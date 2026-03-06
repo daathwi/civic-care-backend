@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CivicCare Admin</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <link rel="stylesheet" href="/static/admin/css/style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-brand">CivicCare Admin</div>
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-item active" data-page="dashboard">Global Overview</a>
+        <a href="#" class="nav-item" data-page="map">Map View</a>
+        <a href="#" class="nav-item" data-page="grievances">Grievances</a>
+        <a href="#" class="nav-item" data-page="ward-performance">Ward Performance</a>
+        <a href="#" class="nav-item" data-page="workers">Officer Management</a>
+        <a href="#" class="nav-item" data-page="logs">System Logs</a>
+        <a href="#" class="nav-item nav-item-secondary" data-page="departments">Departments</a>
+        <a href="#" class="nav-item nav-item-secondary" data-page="wards">Wards & Zones</a>
+      </nav>
+      <div class="sidebar-footer">
+        <div id="auth-area">
+          <div id="login-form" class="login-form">
+            <input type="text" id="login-user-id" placeholder="User ID (e.g. b2000001-0001-4000-8000-000000000001)" title="Staff login uses User ID and password" />
+            <input type="password" id="login-password" placeholder="Password" />
+            <button type="button" id="btn-login">Login</button>
+          </div>
+          <div id="user-info" class="user-info hidden">
+            <span id="user-name"></span>
+            <button type="button" id="btn-logout">Logout</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="header">
+        <h1 id="page-title">Dashboard</h1>
+      </header>
+      <div id="content" class="content">
+        <section id="page-dashboard" class="page active">
+          <div class="cards">
+            <div class="card card-clickable" data-page="grievances">
+              <div class="card-value" id="stat-grievances">–</div>
+              <div class="card-label">Total Grievances</div>
+            </div>
+            <div class="card card-clickable card-status-pending" data-page="grievances">
+              <div class="card-value" id="stat-pending">–</div>
+              <div class="card-label">Pending</div>
+            </div>
+            <div class="card card-clickable card-status-assigned" data-page="grievances">
+              <div class="card-value" id="stat-assigned">–</div>
+              <div class="card-label">Assigned</div>
+            </div>
+            <div class="card card-clickable card-status-inprogress" data-page="grievances">
+              <div class="card-value" id="stat-inprogress">–</div>
+              <div class="card-label">In Progress</div>
+            </div>
+            <div class="card card-clickable card-status-resolved" data-page="grievances">
+              <div class="card-value" id="stat-resolved">–</div>
+              <div class="card-label">Resolved</div>
+            </div>
+            <div class="card card-clickable" data-page="workers">
+              <div class="card-value" id="stat-workers">–</div>
+              <div class="card-label">Field Staff</div>
+            </div>
+            <div class="card card-clickable" data-page="wards">
+              <div class="card-value" id="stat-wards">–</div>
+              <div class="card-label">Wards</div>
+            </div>
+            <div class="card card-clickable" data-page="departments">
+              <div class="card-value" id="stat-departments">–</div>
+              <div class="card-label">Departments</div>
+            </div>
+          </div>
+          <div class="dashboard-bottom">
+            <div class="recent-activity-panel">
+              <div class="panel-header">
+                <h3 class="panel-title">Recent Grievances</h3>
+                <a href="#" class="panel-link nav-to-grievances">View all →</a>
+              </div>
+              <div id="recent-grievances-list" class="activity-list">
+                <div class="activity-empty">Loading…</div>
+              </div>
+            </div>
+            <div class="breakdown-panel">
+              <div class="panel-header">
+                <h3 class="panel-title">Status Breakdown</h3>
+              </div>
+              <div id="status-breakdown" class="breakdown-bars"></div>
+            </div>
+          </div>
+        </section>
+        <section id="page-map" class="page">
+          <div class="smart-filter-bar">
+            <select id="cc-zone-filter">
+              <option value="">All zones</option>
+            </select>
+            <select id="cc-ward-filter">
+              <option value="">All wards</option>
+            </select>
+            <select id="cc-status-filter">
+              <option value="">All statuses</option>
+              <option value="pending">Open (Pending)</option>
+              <option value="assigned">Assigned</option>
+              <option value="inprogress">In progress</option>
+              <option value="resolved">Closed (Resolved)</option>
+            </select>
+            <input type="date" id="cc-date-from" title="From date" />
+            <input type="date" id="cc-date-to" title="To date" />
+            <label class="toggle-chip" title="Heatmap is always shown. Toggle to also show individual markers."><input type="checkbox" id="cc-heatmap-toggle" checked /> Show Markers</label>
+            <button type="button" id="btn-cc-refresh" class="btn btn-primary flex-none">Refresh</button>
+            <button type="button" id="btn-export-csv" class="btn flex-none">CSV</button>
+            <button type="button" id="btn-export-pdf" class="btn flex-none">PDF</button>
+          </div>
+          <div id="map-stat-bar" class="map-stat-bar"></div>
+          <div class="map-layout">
+            <div class="map-panel" style="position:relative;">
+              <div id="map-loading" class="map-loading hidden"><span class="spinner"></span> Loading…</div>
+              <div id="command-map"></div>
+            </div>
+            <aside class="ward-info-panel" id="ward-info-panel">
+              <h3>Ward Info</h3>
+              <div id="ward-info-content" class="ward-info-placeholder">Click a ward polygon on the map or choose a ward in the filter.</div>
+              <div class="map-legend">
+                <div class="legend-title">Marker Legend</div>
+                <div class="legend-row"><span class="legend-dot legend-pending"></span> Pending (Open)</div>
+                <div class="legend-row"><span class="legend-dot legend-inprogress"></span> Assigned / In Progress</div>
+                <div class="legend-row"><span class="legend-dot legend-resolved"></span> Resolved</div>
+                <div class="legend-note">Heatmap intensity = complaint density</div>
+              </div>
+            </aside>
+          </div>
+          <div class="table-wrap">
+            <div class="table-toolbar">
+              <input type="text" id="cc-grid-search" placeholder="Search grievance table..." />
+            </div>
+            <table class="data-table" id="cc-grid">
+              <thead>
+                <tr>
+                  <th data-sort="title">Title / ID</th>
+                  <th data-sort="ward_name">Ward</th>
+                  <th data-sort="category_name">Category</th>
+                  <th data-sort="assigned_to_name">Assigned Officer</th>
+                  <th data-sort="status">Status</th>
+                  <th>View Proof</th>
+                </tr>
+              </thead>
+              <tbody id="cc-grid-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+        <section id="page-grievances" class="page">
+          <div class="toolbar">
+            <select id="filter-status">
+              <option value="">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="assigned">Assigned</option>
+              <option value="inprogress">In progress</option>
+              <option value="resolved">Resolved</option>
+            </select>
+            <select id="filter-priority">
+              <option value="">All priorities</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+            <select id="filter-ward-id">
+              <option value="">All wards</option>
+            </select>
+            <input type="text" id="filter-ward-name" placeholder="Ward name (partial)" title="Filter by ward name (partial match)" />
+            <select id="filter-category-dept">
+              <option value="">All departments (category)</option>
+            </select>
+            <input type="text" id="filter-reporter-id" placeholder="Reporter user ID (optional)" title="Filter by reporter user UUID" />
+            <select id="filter-limit">
+              <option value="10">10 per page</option>
+              <option value="20">20 per page</option>
+              <option value="50">50 per page</option>
+              <option value="100">100 per page</option>
+            </select>
+            <button type="button" id="btn-refresh-grievances" class="btn btn-primary">Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Status</th>
+                  <th>Priority</th>
+                  <th>Category</th>
+                  <th>Ward</th>
+                  <th>Assigned Officer</th>
+                  <th>Reporter</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="grievances-tbody"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="grievances-pagination"></div>
+        </section>
+        <section id="page-ward-performance" class="page">
+          <div class="toolbar">
+            <select id="perf-zone-filter">
+              <option value="">All zones</option>
+            </select>
+            <select id="perf-sort">
+              <option value="resolution_desc">Best resolution rate first</option>
+              <option value="resolution_asc">Lowest resolution rate first</option>
+              <option value="resolved_desc">Most resolved first</option>
+              <option value="open_desc">Most open first</option>
+              <option value="total_desc">Total grievances (high to low)</option>
+            </select>
+            <button type="button" id="btn-refresh-perf" class="btn btn-primary flex-none">Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="ward-perf-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Ward</th>
+                  <th>Zone</th>
+                  <th>Total</th>
+                  <th>Resolved</th>
+                  <th>Pending</th>
+                  <th>In Progress</th>
+                  <th>Resolution %</th>
+                </tr>
+              </thead>
+              <tbody id="ward-perf-tbody"></tbody>
+            </table>
+          </div>
+          <p class="perf-note" id="ward-perf-note"></p>
+        </section>
+        <section id="page-departments" class="page">
+          <div class="add-section hidden" id="add-department-section">
+            <h3 class="add-heading">Add department</h3>
+            <form id="form-add-department" class="add-form add-form-grid">
+              <input type="text" name="name" placeholder="Name" required />
+              <input type="text" name="short_code" placeholder="Short code" required maxlength="20" />
+              <input type="text" name="primary_color" placeholder="Color (e.g. #1976D2)" value="#1976D2" />
+              <input type="text" name="icon" placeholder="Icon name" value="assignment" />
+              <input type="text" name="manager_title" placeholder="Manager title" value="Manager" />
+              <input type="text" name="assistant_title" placeholder="Assistant title" value="Assistant" />
+              <input type="text" name="jurisdiction_label" placeholder="Jurisdiction" value="Ward" />
+              <div class="add-form-actions">
+                <button type="submit" class="btn btn-primary">Add department</button>
+                <button type="button" class="btn btn-secondary btn-cancel-add" data-cancel="add-department-section">Cancel</button>
+              </div>
+            </form>
+          </div>
+          <div class="add-section hidden" id="add-category-section">
+            <h3 class="add-heading">Add grievance category</h3>
+            <form id="form-add-category" class="add-form">
+              <select name="dept_id" id="add-category-department" required><option value="">Select department</option></select>
+              <input type="text" name="name" placeholder="Category name" required />
+              <button type="submit" class="btn btn-primary">Add category</button>
+              <button type="button" class="btn btn-secondary btn-cancel-add" data-cancel="add-category-section">Cancel</button>
+            </form>
+          </div>
+          <button type="button" class="btn btn-add" id="btn-add-department">+ Add department</button>
+          <button type="button" class="btn btn-add" id="btn-add-category">+ Add grievance category</button>
+          <h3 class="subsection-title">Departments</h3>
+          <div class="table-wrap">
+            <table class="data-table" id="departments-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Short code</th>
+                  <th>Jurisdiction</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="departments-tbody"></tbody>
+            </table>
+          </div>
+          <h3 class="subsection-title">Grievance categories</h3>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th>Department</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="categories-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+        <section id="page-wards" class="page">
+          <div class="tabs">
+            <button type="button" class="tab active" data-tab="wards">Wards</button>
+            <button type="button" class="tab" data-tab="zones">Zones</button>
+          </div>
+          <div class="toolbar" id="wards-toolbar">
+            <select id="filter-ward-zone">
+              <option value="">All zones</option>
+            </select>
+          </div>
+          <div class="add-section hidden" id="add-zone-section">
+            <h3 class="add-heading">Add zone</h3>
+            <form id="form-add-zone" class="add-form">
+              <input type="text" name="name" placeholder="Name" required />
+              <input type="text" name="code" placeholder="Code" required />
+              <button type="submit" class="btn btn-primary">Add zone</button>
+              <button type="button" class="btn btn-secondary btn-cancel-add" data-cancel="add-zone-section">Cancel</button>
+            </form>
+          </div>
+          <div class="add-section hidden" id="add-ward-section">
+            <h3 class="add-heading">Add ward</h3>
+            <form id="form-add-ward" class="add-form">
+              <select name="zone_id" id="add-ward-zone" required><option value="">Select zone</option></select>
+              <input type="text" name="name" placeholder="Ward name" required />
+              <input type="number" name="number" placeholder="Number" required min="1" />
+              <input type="text" name="representative_name" placeholder="Representative (optional)" />
+              <button type="submit" class="btn btn-primary">Add ward</button>
+              <button type="button" class="btn btn-secondary btn-cancel-add" data-cancel="add-ward-section">Cancel</button>
+            </form>
+          </div>
+          <button type="button" class="btn btn-add hidden" id="btn-add-zone">+ Add zone</button>
+          <button type="button" class="btn btn-add" id="btn-add-ward">+ Add ward</button>
+          <div class="table-wrap" id="wards-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Number</th>
+                  <th>Zone</th>
+                  <th>Representative</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="wards-tbody"></tbody>
+            </table>
+          </div>
+          <div class="table-wrap hidden" id="zones-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Code</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="zones-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+        <section id="page-workers" class="page">
+          <div class="add-section hidden" id="add-worker-section">
+            <h3 class="add-heading">Add worker (user + work profile)</h3>
+            <p class="add-hint">Workers are users. Fill all user attributes (login identity and profile) and work assignment.</p>
+            <form id="form-add-worker" class="add-form add-form-grid add-form-worker">
+              <span class="form-section-label">User attributes (identity &amp; profile)</span>
+              <label class="form-field-label">Full name *</label>
+              <input type="text" name="name" placeholder="Full name" required />
+              <label class="form-field-label">Email</label>
+              <input type="email" name="email" placeholder="Email (optional)" />
+              <label class="form-field-label">Phone *</label>
+              <input type="tel" name="phone" placeholder="Phone (used for login)" required />
+              <label class="form-field-label">Address</label>
+              <input type="text" name="address" placeholder="Address (optional)" />
+              <label class="form-field-label">Password *</label>
+              <input type="password" name="password" placeholder="Initial password" required />
+              <label class="form-field-label">Confirm password *</label>
+              <input type="password" name="password_confirm" placeholder="Confirm password" required />
+              <label class="form-field-label">Role</label>
+              <select name="role">
+                <option value="fieldAssistant">Field Assistant</option>
+                <option value="fieldManager">Field Manager</option>
+              </select>
+              <span class="form-section-label">Work profile (assignment)</span>
+              <label class="form-field-label">Designation *</label>
+              <input type="text" name="designation_title" placeholder="e.g. Field Worker, Junior Engineer" required />
+              <label class="form-field-label">Department</label>
+              <select name="department_id" id="add-worker-department"><option value="">Department (optional)</option></select>
+              <label class="form-field-label">Zone</label>
+              <select name="zone_id" id="add-worker-zone"><option value="">Zone (optional)</option></select>
+              <label class="form-field-label">Ward</label>
+              <select name="ward_id" id="add-worker-ward"><option value="">Ward (optional)</option></select>
+              <div class="add-form-actions">
+                <button type="submit" class="btn btn-primary">Create worker</button>
+                <button type="button" class="btn btn-secondary btn-cancel-add" data-cancel="add-worker-section">Cancel</button>
+              </div>
+            </form>
+          </div>
+          <div class="toolbar">
+            <button type="button" class="btn btn-add" id="btn-add-worker">+ Add worker</button>
+            <select id="filter-worker-department">
+              <option value="">All departments</option>
+            </select>
+            <select id="filter-worker-ward">
+              <option value="">All wards</option>
+            </select>
+            <select id="filter-worker-role">
+              <option value="">All roles</option>
+              <option value="fieldAssistant">Field Assistant</option>
+              <option value="fieldManager">Field Manager</option>
+            </select>
+            <select id="filter-worker-status">
+              <option value="">All statuses</option>
+              <option value="onDuty">On duty</option>
+              <option value="offDuty">Off duty</option>
+            </select>
+            <select id="filter-worker-limit">
+              <option value="10">10 per page</option>
+              <option value="20" selected>20 per page</option>
+              <option value="50">50 per page</option>
+              <option value="100">100 per page</option>
+            </select>
+          </div>
+          <div class="pagination" id="workers-pagination"></div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Role</th>
+                  <th>Designation</th>
+                  <th>Department</th>
+                  <th>Ward</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="workers-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+        <section id="page-logs" class="page">
+          <div class="toolbar">
+            <input type="text" id="logs-search" placeholder="Search grievance title…" />
+            <input type="date" id="logs-date-from" />
+            <input type="date" id="logs-date-to" />
+            <select id="logs-geo-filter">
+              <option value="">All events</option>
+              <option value="bad">Geofence violations only</option>
+              <option value="ok">Compliant only</option>
+            </select>
+            <button type="button" id="btn-refresh-logs" class="btn btn-primary flex-none">Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Grievance</th>
+                  <th>Ward</th>
+                  <th>Event</th>
+                  <th>Geofence</th>
+                </tr>
+              </thead>
+              <tbody id="system-logs-tbody"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="logs-pagination"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div id="modal-status" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box">
+      <h3>Update status &amp; priority</h3>
+      <div class="modal-body">
+        <input type="hidden" id="modal-grievance-id" />
+        <label for="modal-status-select">Status</label>
+        <select id="modal-status-select">
+          <option value="pending">Pending</option>
+          <option value="assigned">Assigned</option>
+          <option value="inprogress">In progress</option>
+          <option value="resolved">Resolved</option>
+        </select>
+        <label for="modal-priority-select">Priority</label>
+        <select id="modal-priority-select">
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary modal-close">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-save-status">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-assign-worker" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box">
+      <h3>Assign worker</h3>
+      <div class="modal-body">
+        <input type="hidden" id="modal-assign-grievance-id" />
+        <label for="modal-assign-worker-select">Worker</label>
+        <select id="modal-assign-worker-select"><option value="">Select worker</option></select>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary modal-close-assign">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-save-assign">Assign</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-edit-zone" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box">
+      <h3>Edit zone</h3>
+      <div class="modal-body">
+        <input type="hidden" id="edit-zone-id" />
+        <label for="edit-zone-name">Name</label>
+        <input type="text" id="edit-zone-name" placeholder="Name" />
+        <label for="edit-zone-code">Code</label>
+        <input type="text" id="edit-zone-code" placeholder="Code" />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary modal-close-edit" data-modal="modal-edit-zone">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-save-zone">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-edit-ward" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box">
+      <h3>Edit ward</h3>
+      <div class="modal-body">
+        <input type="hidden" id="edit-ward-id" />
+        <label for="edit-ward-zone">Zone</label>
+        <select id="edit-ward-zone"><option value="">Zone</option></select>
+        <label for="edit-ward-name">Name</label>
+        <input type="text" id="edit-ward-name" placeholder="Name" />
+        <label for="edit-ward-number">Number</label>
+        <input type="number" id="edit-ward-number" placeholder="Number" min="1" />
+        <label for="edit-ward-rep">Representative (optional)</label>
+        <input type="text" id="edit-ward-rep" placeholder="Representative" />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary modal-close-edit" data-modal="modal-edit-ward">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-save-ward">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-edit-department" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box modal-box-wide">
+      <h3>Edit department</h3>
+      <div class="modal-body">
+        <input type="hidden" id="edit-dept-id" />
+        <label for="edit-dept-name">Name</label>
+        <input type="text" id="edit-dept-name" placeholder="Name" />
+        <label for="edit-dept-short-code">Short code</label>
+        <input type="text" id="edit-dept-short-code" placeholder="Short code" />
+        <label for="edit-dept-color">Color</label>
+        <input type="text" id="edit-dept-color" placeholder="Color" />
+        <label for="edit-dept-icon">Icon</label>
+        <input type="text" id="edit-dept-icon" placeholder="Icon" />
+        <label for="edit-dept-manager-title">Manager title</label>
+        <input type="text" id="edit-dept-manager-title" placeholder="Manager title" />
+        <label for="edit-dept-assistant-title">Assistant title</label>
+        <input type="text" id="edit-dept-assistant-title" placeholder="Assistant title" />
+        <label for="edit-dept-jurisdiction">Jurisdiction</label>
+        <input type="text" id="edit-dept-jurisdiction" placeholder="Jurisdiction" />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary modal-close-edit" data-modal="modal-edit-department">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-save-department">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-edit-category" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box">
+      <h3>Edit category</h3>
+      <div class="modal-body">
+        <input type="hidden" id="edit-cat-id" />
+        <label for="edit-cat-name">Name</label>
+        <input type="text" id="edit-cat-name" placeholder="Name" />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary modal-close-edit" data-modal="modal-edit-category">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-save-category">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-edit-worker" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box modal-box-wide">
+      <h3>Edit worker (user + work profile)</h3>
+      <input type="hidden" id="edit-worker-id" />
+      <div class="modal-body modal-form-grid">
+        <span class="form-section-label">User attributes</span>
+        <label for="edit-worker-name">Full name</label>
+        <input type="text" id="edit-worker-name" placeholder="Full name" />
+        <label for="edit-worker-email">Email</label>
+        <input type="email" id="edit-worker-email" placeholder="Email (optional)" />
+        <label for="edit-worker-phone">Phone</label>
+        <input type="text" id="edit-worker-phone" placeholder="Phone" />
+        <label for="edit-worker-address">Address</label>
+        <input type="text" id="edit-worker-address" placeholder="Address (optional)" />
+        <label for="edit-worker-password">New password (leave blank to keep)</label>
+        <input type="password" id="edit-worker-password" placeholder="New password" />
+        <label for="edit-worker-role">Role</label>
+        <select id="edit-worker-role">
+          <option value="fieldAssistant">Field Assistant</option>
+          <option value="fieldManager">Field Manager</option>
+        </select>
+        <span class="form-section-label">Work profile</span>
+        <label for="edit-worker-designation">Designation</label>
+        <input type="text" id="edit-worker-designation" placeholder="Designation" />
+        <label for="edit-worker-department">Department</label>
+        <select id="edit-worker-department"><option value="">Department (optional)</option></select>
+        <label for="edit-worker-zone">Zone</label>
+        <select id="edit-worker-zone"><option value="">Zone (optional)</option></select>
+        <label for="edit-worker-ward">Ward</label>
+        <select id="edit-worker-ward"><option value="">Ward (optional)</option></select>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary modal-close-edit" data-modal="modal-edit-worker">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-save-worker">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+  <script src="/static/admin/js/app.js"></script>
+</body>
+</html>
