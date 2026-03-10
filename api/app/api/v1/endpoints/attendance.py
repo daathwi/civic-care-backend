@@ -43,6 +43,7 @@ async def clock_in(
     if existing.scalar_one_or_none():
         raise HTTPException(status.HTTP_409_CONFLICT, "Already clocked in today")
 
+    print(f"[DEBUG] Attendance: User {user.id} clock-in at ({body.lat}, {body.lng})")
     now = datetime.now(timezone.utc)
     record = AttendanceRecord(
         user_id=user.id,
@@ -85,6 +86,7 @@ async def clock_out(
     if not record:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No active clock-in found")
 
+    print(f"[DEBUG] Attendance: User {user.id} clock-out at ({body.lat}, {body.lng})")
     now = datetime.now(timezone.utc)
     record.clock_out_time = now
     record.clock_out_lat = body.lat
@@ -125,3 +127,23 @@ async def attendance_status(
         is_clocked_in=record is not None,
         current_record=AttendanceOut.model_validate(record) if record else None,
     )
+
+
+@router.get(
+    "/history",
+    response_model=list[AttendanceOut],
+    summary="Attendance history",
+    description="Get past attendance records for the worker (up to 30 days). **Access:** fieldManager, fieldAssistant, or admin (Bearer required).",
+)
+async def attendance_history(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_staff),
+):
+    result = await db.execute(
+        select(AttendanceRecord)
+        .where(AttendanceRecord.user_id == user.id)
+        .order_by(AttendanceRecord.date.desc())
+        .limit(30)
+    )
+    records = result.scalars().all()
+    return [AttendanceOut.model_validate(r) for r in records]

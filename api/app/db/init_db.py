@@ -250,6 +250,50 @@ DO $$ BEGIN
 END $$;
 """
 
+ADD_GRIEVANCES_CITIZEN_RATING_COLUMN = """
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'grievances' AND column_name = 'citizen_rating'
+  ) THEN
+    ALTER TABLE grievances ADD COLUMN citizen_rating INTEGER;
+  END IF;
+END $$;
+"""
+
+ADD_COMPLAINT_STATUS_ESCALATED = """
+DO $$ BEGIN
+  ALTER TYPE complaint_status ADD VALUE 'escalated';
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+"""
+
+
+ADD_INTERNAL_MESSAGES_CONVERSATION_ID_COLUMN = """
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'internal_messages' AND column_name = 'conversation_id'
+  ) THEN
+    ALTER TABLE internal_messages ADD COLUMN conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE;
+  END IF;
+END $$;
+"""
+
+ADD_CONVERSATIONS_GRIEVANCE_ID_COLUMN = """
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'conversations' AND column_name = 'grievance_id'
+  ) THEN
+    ALTER TABLE conversations ADD COLUMN grievance_id UUID REFERENCES grievances(id) ON DELETE CASCADE;
+  END IF;
+END $$;
+"""
+
+ALTER_INTERNAL_MESSAGES_RECEIVER_ID_NULLABLE = "ALTER TABLE internal_messages ALTER COLUMN receiver_id DROP NOT NULL;"
+
 
 # Path to MCD wards CSV (testing/backend_tests/mcd_wards_data.csv)
 _BACKEND_DIR = Path(__file__).resolve().parent.parent.parent.parent
@@ -411,7 +455,12 @@ async def init_db() -> None:
         await conn.execute(text(ALTER_GRIEVANCE_CATEGORIES_DEPT_ID_UUID.strip()))
         await conn.execute(text(ALTER_WORKER_PROFILES_DEPARTMENT_ID_UUID.strip()))
         await conn.execute(text(MIGRATE_COMPLAINT_STATUS_ENUM.strip()))
+        await conn.execute(text(ADD_COMPLAINT_STATUS_ESCALATED.strip()))
         await conn.execute(text(ADD_GRIEVANCES_IS_SENSITIVE_COLUMN.strip()))
+        await conn.execute(text(ADD_GRIEVANCES_CITIZEN_RATING_COLUMN.strip()))
+        await conn.execute(text(ADD_INTERNAL_MESSAGES_CONVERSATION_ID_COLUMN.strip()))
+        await conn.execute(text(ADD_CONVERSATIONS_GRIEVANCE_ID_COLUMN.strip()))
+        await conn.execute(text(ALTER_INTERNAL_MESSAGES_RECEIVER_ID_NULLABLE.strip()))
         # Seed zones only when empty
         zones_count = (await conn.execute(text("SELECT COUNT(*) FROM zones"))).scalar() or 0
         if zones_count == 0:

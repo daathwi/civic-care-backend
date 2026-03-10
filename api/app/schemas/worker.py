@@ -58,6 +58,8 @@ class WorkerOut(BaseModel):
     tasks_completed: int = Field(0, description="Number of tasks completed.")
     tasks_active: int = Field(0, description="Number of active tasks.")
     status: str | None = Field(None, description="onDuty or offDuty.")
+    last_active_lat: float | None = Field(None, description="Last known latitude.")
+    last_active_lng: float | None = Field(None, description="Last known longitude.")
 
     @field_validator("tasks_completed", "tasks_active", mode="before")
     @classmethod

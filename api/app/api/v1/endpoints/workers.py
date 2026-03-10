@@ -37,6 +37,8 @@ def _to_worker_out(user: User) -> WorkerOut:
         tasks_completed=wp.tasks_completed if wp else 0,
         tasks_active=wp.tasks_active if wp else 0,
         status=wp.current_status if wp else None,
+        last_active_lat=float(wp.last_active_lat) if wp and wp.last_active_lat else None,
+        last_active_lng=float(wp.last_active_lng) if wp and wp.last_active_lng else None,
     )
 
 

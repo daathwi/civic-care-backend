@@ -1,16 +1,24 @@
+import logging
+import traceback
 from datetime import datetime, timezone
 from typing import List
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, or_, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.db.database import get_db
-from app.models.models import User, InternalMessage, WorkerProfile
-from app.schemas.internal_messages import InternalMessage as MessageSchema, InternalMessageCreate, ConversationMember
+from app.models.models import User, InternalMessage, WorkerProfile, Conversation, ConversationParticipant, Grievance
+from app.schemas.internal_messages import InternalMessage as MessageSchema, InternalMessageCreate, ConversationMember, ConversationSchema
 from app.api.v1.endpoints.auth import get_current_user
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+def _get_role_name(user: User) -> str:
+    r = getattr(user, "role", "citizen")
+    return getattr(r, "value", r) if hasattr(r, "value") else str(r)
 
 @router.post("/send", response_model=MessageSchema)
 async def send_message(
@@ -18,21 +26,50 @@ async def send_message(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # Find or create DM conversation
+    u1_id = current_user.id
+    u2_id = message_in.receiver_id
+    
     # Verify receiver exists
-    result = await db.execute(select(User).where(User.id == message_in.receiver_id))
+    result = await db.execute(select(User).where(User.id == u2_id))
     receiver = result.scalar_one_or_none()
     if not receiver:
         raise HTTPException(status_code=404, detail="Receiver not found")
+
+    # Find a conversation where both u1 and u2 are participants
+    conv_query = select(Conversation).join(ConversationParticipant).where(
+        ConversationParticipant.user_id.in_([u1_id, u2_id])
+    ).group_by(Conversation.id).having(func.count(ConversationParticipant.user_id) == 2)
     
-    # Optional: Verify they are in the same department (optional but good for 'personalised department chat')
-    # For now, let's just allow sending to anyone if they are staff
+    conv_res = await db.execute(conv_query)
+    conv = conv_res.scalar_one_or_none()
+    
+    if not conv:
+        conv = Conversation(type="dm")
+        db.add(conv)
+        await db.flush()
+        
+        db.add(ConversationParticipant(conversation_id=conv.id, user_id=u1_id))
+        db.add(ConversationParticipant(conversation_id=conv.id, user_id=u2_id))
     
     new_msg = InternalMessage(
-        sender_id=current_user.id,
-        receiver_id=message_in.receiver_id,
+        sender_id=u1_id,
+        receiver_id=u2_id, # Keep for compatibility
+        conversation_id=conv.id,
         content=message_in.content
     )
     db.add(new_msg)
+    
+    # Update unread count for receiver
+    await db.execute(
+        ConversationParticipant.__table__.update()
+        .where(and_(
+            ConversationParticipant.conversation_id == conv.id,
+            ConversationParticipant.user_id == u2_id
+        ))
+        .values(unread_count=ConversationParticipant.unread_count + 1)
+    )
+    
     await db.commit()
     await db.refresh(new_msg)
     return new_msg
@@ -43,11 +80,32 @@ async def get_thread(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # Find conversation
+    conv_query = select(Conversation.id).join(ConversationParticipant).where(
+        ConversationParticipant.user_id.in_([current_user.id, other_user_id])
+    ).group_by(Conversation.id).having(func.count(ConversationParticipant.user_id) == 2)
+    
+    conv_res = await db.execute(conv_query)
+    conv_id = conv_res.scalar_one_or_none()
+    
+    if not conv_id:
+        return []
+
+    # Reset unread count for current user
+    await db.execute(
+        ConversationParticipant.__table__.update()
+        .where(and_(
+            ConversationParticipant.conversation_id == conv_id,
+            ConversationParticipant.user_id == current_user.id
+        ))
+        .values(unread_count=0)
+    )
+    
     # Mark messages as read
     await db.execute(
         InternalMessage.__table__.update()
         .where(and_(
-            InternalMessage.sender_id == other_user_id,
+            InternalMessage.conversation_id == conv_id,
             InternalMessage.receiver_id == current_user.id,
             InternalMessage.is_read == False
         ))
@@ -56,10 +114,7 @@ async def get_thread(
     await db.commit()
 
     query = select(InternalMessage).where(
-        or_(
-            and_(InternalMessage.sender_id == current_user.id, InternalMessage.receiver_id == other_user_id),
-            and_(InternalMessage.sender_id == other_user_id, InternalMessage.receiver_id == current_user.id)
-        )
+        InternalMessage.conversation_id == conv_id
     ).order_by(InternalMessage.created_at.asc())
     
     result = await db.execute(query)
@@ -70,82 +125,270 @@ async def get_conversations(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # This is a bit complex for a simple query, let's find all users current_user has messaged with
-    # First, find IDs of people we've chatted with
-    sent_to = select(InternalMessage.receiver_id).where(InternalMessage.sender_id == current_user.id)
-    received_from = select(InternalMessage.sender_id).where(InternalMessage.receiver_id == current_user.id)
-    
-    chatted_ids_query = sent_to.union(received_from)
-    res = await db.execute(chatted_ids_query)
-    chatted_ids = [r[0] for r in res.fetchall()]
-    
-    if not chatted_ids:
-        return []
-    
-    # Fetch user details for these IDs
-    users_query = select(User).where(User.id.in_(chatted_ids))
-    users_res = await db.execute(users_query)
-    users = users_res.scalars().all()
-    
-    conversations = []
-    for user in users:
-        # Get last message
-        last_msg_query = select(InternalMessage).where(
-            or_(
-                and_(InternalMessage.sender_id == current_user.id, InternalMessage.receiver_id == user.id),
-                and_(InternalMessage.sender_id == user.id, InternalMessage.receiver_id == current_user.id)
-            )
-        ).order_by(InternalMessage.created_at.desc()).limit(1)
-        last_msg_res = await db.execute(last_msg_query)
-        last_msg = last_msg_res.scalar_one_or_none()
+    try:
+        # Get all conversations where current_user is a participant
+        query = select(Conversation).join(ConversationParticipant).where(
+            ConversationParticipant.user_id == current_user.id
+        ).order_by(Conversation.updated_at.desc())
         
-        # Get unread count
-        unread_query = select(func.count(InternalMessage.id)).where(
+        result = await db.execute(query)
+        conversations_list = result.scalars().all()
+        
+        results = []
+        for conv in conversations_list:
+            # For DM, find the other participant
+            other_participant_query = select(User).join(ConversationParticipant).where(
+                and_(
+                    ConversationParticipant.conversation_id == conv.id,
+                    ConversationParticipant.user_id != current_user.id
+                )
+            )
+            other_user_res = await db.execute(other_participant_query)
+            other_user = other_user_res.scalar_one_or_none()
+            
+            if not other_user:
+                continue
+                
+            # Get last message from conv
+            last_msg_query = select(InternalMessage).where(
+                InternalMessage.conversation_id == conv.id
+            ).order_by(InternalMessage.created_at.desc()).limit(1)
+            last_msg_res = await db.execute(last_msg_query)
+            last_msg = last_msg_res.scalar_one_or_none()
+            
+            # Get unread count for current user in this conv
+            unread_query = select(ConversationParticipant.unread_count).where(
+                and_(
+                    ConversationParticipant.conversation_id == conv.id,
+                    ConversationParticipant.user_id == current_user.id
+                )
+            )
+            unread_res = await db.execute(unread_query)
+            unread_count = unread_res.scalar() or 0
+            
+            results.append(ConversationMember(
+                id=other_user.id,
+                name=other_user.name,
+                role=_get_role_name(other_user),
+                last_message=last_msg.content if last_msg else None,
+                last_message_time=last_msg.created_at if last_msg else None,
+                unread_count=unread_count
+            ))
+            
+        return results
+    except Exception as e:
+        logger.error(f"Error in get_conversations: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/grievance/{grievance_id}", response_model=UUID)
+async def get_grievance_conversation(
+    grievance_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Verify grievance exists
+    result = await db.execute(select(Grievance).where(Grievance.id == grievance_id))
+    grievance = result.scalar_one_or_none()
+    if not grievance:
+        raise HTTPException(status_code=404, detail="Grievance not found")
+
+    # Find or create conversation for this grievance
+    # Since it's task-based, typically all staff involved might see it, 
+    # but for now let's handle it as a shared thread for the grievance.
+    conv_query = select(Conversation).where(
+        and_(
+            Conversation.type == "task",
+            Conversation.grievance_id == grievance_id
+        )
+    ).limit(1)
+    conv_res = await db.execute(conv_query)
+    conv = conv_res.scalar_one_or_none()
+
+    if not conv:
+        try:
+            conv = Conversation(
+                type="task",
+                grievance_id=grievance_id,
+                name=f"Chat for Task: {grievance_id}"
+            )
+            db.add(conv)
+            await db.flush()
+            
+            # Add the current user as a participant
+            db.add(ConversationParticipant(conversation_id=conv.id, user_id=current_user.id))
+            await db.commit()
+        except IntegrityError:
+            # Another request created it between our initial select and this insert.
+            await db.rollback()
+            conv_res = await db.execute(conv_query)
+            conv = conv_res.scalar_one_or_none()
+            if not conv:
+                raise HTTPException(status_code=500, detail="Failed to create or retrieve task conversation")
+            
+            # Still attempt to add current user to this pre-existing conv just in case
+            part_query = select(ConversationParticipant).where(
+                and_(
+                    ConversationParticipant.conversation_id == conv.id,
+                    ConversationParticipant.user_id == current_user.id
+                )
+            )
+            part_res = await db.execute(part_query)
+            if not part_res.scalar_one_or_none():
+                db.add(ConversationParticipant(conversation_id=conv.id, user_id=current_user.id))
+                await db.commit()
+    else:
+        # Check if current user is participant, if not, add them
+        part_query = select(ConversationParticipant).where(
             and_(
-                InternalMessage.sender_id == user.id,
-                InternalMessage.receiver_id == current_user.id,
-                InternalMessage.is_read == False
+                ConversationParticipant.conversation_id == conv.id,
+                ConversationParticipant.user_id == current_user.id
             )
         )
-        unread_res = await db.execute(unread_query)
-        unread_count = unread_res.scalar() or 0
-        
-        conversations.append(ConversationMember(
-            id=user.id,
-            name=user.name,
-            role=str(user.role),
-            last_message=last_msg.content if last_msg else None,
-            last_message_time=last_msg.created_at if last_msg else None,
-            unread_count=unread_count
-        ))
-    
-    # Sort by last message time
-    conversations.sort(key=lambda x: x.last_message_time or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
-    return conversations
+        part_res = await db.execute(part_query)
+        if not part_res.scalar_one_or_none():
+            db.add(ConversationParticipant(conversation_id=conv.id, user_id=current_user.id))
+            await db.commit()
+
+    return conv.id
 
 @router.get("/colleagues", response_model=List[ConversationMember])
 async def get_colleagues(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Fetch people in the same department
-    if not current_user.worker_profile or not current_user.worker_profile.department_id:
-        return []
-    
-    dept_id = current_user.worker_profile.department_id
-    query = select(User).join(WorkerProfile, User.id == WorkerProfile.user_id).where(
+    try:
+        # Fetch people in the same department
+        if not current_user.worker_profile or not current_user.worker_profile.department_id:
+            return []
+        
+        dept_id = current_user.worker_profile.department_id
+        # Join User and WorkerProfile explicitly to avoid AmbiguousForeignKeysError
+        query = select(User).join(WorkerProfile, User.id == WorkerProfile.user_id).where(
+            and_(
+                WorkerProfile.department_id == dept_id,
+                User.id != current_user.id
+            )
+        )
+        result = await db.execute(query)
+        users = result.scalars().all()
+        
+        return [
+            ConversationMember(
+                id=u.id,
+                name=u.name,
+                role=_get_role_name(u)
+            ) for u in users
+        ]
+    except Exception as e:
+        logger.error(f"Error in get_colleagues: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Internal server error while fetching colleagues")
+
+@router.get("/conversations/{conversation_id}/messages", response_model=List[MessageSchema])
+async def get_conversation_messages(
+    conversation_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Verify participation
+    part_query = select(ConversationParticipant).where(
         and_(
-            WorkerProfile.department_id == dept_id,
-            User.id != current_user.id
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.user_id == current_user.id
         )
     )
-    result = await db.execute(query)
-    users = result.scalars().all()
+    part_res = await db.execute(part_query)
+    if not part_res.scalar_one_or_none():
+        # For task-based, auto-join if staff
+        conv_res = await db.execute(select(Conversation).where(Conversation.id == conversation_id))
+        conv = conv_res.scalar_one_or_none()
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        # If it's a task conversation, staff can join
+        if conv.type == "task":
+            db.add(ConversationParticipant(conversation_id=conversation_id, user_id=current_user.id))
+            await db.commit()
+        else:
+            raise HTTPException(status_code=403, detail="Not a participant")
+
+    # Reset unread count
+    await db.execute(
+        ConversationParticipant.__table__.update()
+        .where(and_(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.user_id == current_user.id
+        ))
+        .values(unread_count=0)
+    )
+    await db.commit()
+
+    query = (
+        select(InternalMessage, User.name.label("sender_name"))
+        .join(User, InternalMessage.sender_id == User.id)
+        .where(InternalMessage.conversation_id == conversation_id)
+        .order_by(InternalMessage.created_at.asc())
+    )
+    res = await db.execute(query)
     
-    return [
-        ConversationMember(
-            id=u.id,
-            name=u.name,
-            role=str(u.role)
-        ) for u in users
-    ]
+    results = []
+    for msg, sender_name in res.all():
+        msg_dict = {
+            "id": msg.id,
+            "conversation_id": msg.conversation_id,
+            "sender_id": msg.sender_id,
+            "receiver_id": msg.receiver_id,
+            "content": msg.content,
+            "is_read": msg.is_read,
+            "created_at": msg.created_at,
+            "sender_name": sender_name
+        }
+        results.append(msg_dict)
+        
+    return results
+
+@router.post("/conversations/{conversation_id}/messages", response_model=MessageSchema)
+async def send_conversation_message(
+    conversation_id: UUID,
+    message_in: InternalMessageCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Verify participation
+    part_query = select(ConversationParticipant).where(
+        and_(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.user_id == current_user.id
+        )
+    )
+    part_res = await db.execute(part_query)
+    if not part_res.scalar_one_or_none():
+         raise HTTPException(status_code=403, detail="Not a participant")
+
+    try:
+        new_msg = InternalMessage(
+            sender_id=current_user.id,
+            conversation_id=conversation_id,
+            content=message_in.content
+        )
+        db.add(new_msg)
+        
+        # Increment unread for others
+        await db.execute(
+            ConversationParticipant.__table__.update()
+            .where(and_(
+                ConversationParticipant.conversation_id == conversation_id,
+                ConversationParticipant.user_id != current_user.id
+            ))
+            .values(unread_count=ConversationParticipant.unread_count + 1)
+        )
+        
+        await db.commit()
+        await db.refresh(new_msg)
+        return new_msg
+    except Exception as e:
+        logger.error(f"Error in send_conversation_message: {e}")
+        logger.error(traceback.format_exc())
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

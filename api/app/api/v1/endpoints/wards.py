@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from shapely.geometry import shape
+
 
 from app.api.deps import require_manager
 from app.db.database import get_db
@@ -35,6 +37,47 @@ router = APIRouter(tags=["wards & departments"])
 
 # In-memory cache for GeoJSON
 _GEOJSON_CACHE = None
+
+
+def _get_ward_out(w: Ward, zone_name: str | None = None) -> WardOut:
+    """Helper to convert a Ward model to WardOut schema, calculating centroid if available."""
+    centroid_lat = None
+    centroid_lng = None
+    min_lat, max_lat, min_lng, max_lng = None, None, None, None
+    if w.polygon_geojson:
+        try:
+            # Handle if geojson is list (sometimes stored as multi-polygon coordinates)
+            geojson = w.polygon_geojson
+            if isinstance(geojson, list):
+                geojson = {"type": "MultiPolygon", "coordinates": geojson}
+            
+            geom = shape(geojson)
+            if geom and geom.is_valid:
+                centroid = geom.centroid
+                centroid_lat = centroid.y
+                centroid_lng = centroid.x
+                
+                # Calculate bounds
+                bounds = geom.bounds  # (minx, miny, maxx, maxy)
+                min_lng, min_lat, max_lng, max_lat = bounds
+        except Exception as e:
+            print(f"Error calculating geometry for ward {w.number}: {e}")
+
+    return WardOut(
+        id=w.id,
+        name=w.name,
+        number=w.number,
+        zone_id=w.zone_id,
+        zone_name=zone_name or (w.zone.name if w.zone else None),
+        representative_name=w.representative_name,
+        representative_phone=w.representative_phone or [],
+        centroid_lat=centroid_lat,
+        centroid_lng=centroid_lng,
+        min_lat=min_lat,
+        max_lat=max_lat,
+        min_lng=min_lng,
+        max_lng=max_lng,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -158,16 +201,7 @@ async def list_wards(
     query = query.order_by(Ward.number)
     result = await db.execute(query)
     wards = result.scalars().all()
-    return [
-        WardOut(
-            id=w.id, name=w.name, number=w.number,
-            zone_id=w.zone_id,
-            zone_name=w.zone.name if w.zone else None,
-            representative_name=w.representative_name,
-            representative_phone=w.representative_phone or [],
-        )
-        for w in wards
-    ]
+    return [_get_ward_out(w) for w in wards]
 
 
 @router.get(
@@ -190,13 +224,7 @@ async def lookup_ward(
             zone = zone_result.scalar_one_or_none()
         return WardLookupResult(
             found=True,
-            ward=WardOut(
-                id=ward.id, name=ward.name, number=ward.number,
-                zone_id=ward.zone_id,
-                zone_name=zone.name if zone else None,
-                representative_name=ward.representative_name,
-                representative_phone=ward.representative_phone or [],
-            ),
+            ward=_get_ward_out(ward, zone_name=zone.name if zone else None)
         )
     return WardLookupResult(found=False)
 
@@ -244,13 +272,7 @@ async def get_ward(
     w = result.scalar_one_or_none()
     if not w:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ward not found")
-    return WardOut(
-        id=w.id, name=w.name, number=w.number,
-        zone_id=w.zone_id,
-        zone_name=w.zone.name if w.zone else None,
-        representative_name=w.representative_name,
-        representative_phone=w.representative_phone or [],
-    )
+    return _get_ward_out(w)
 
 
 @router.patch(
@@ -289,13 +311,7 @@ async def update_ward(
     await db.refresh(w)
     result = await db.execute(select(Ward).options(selectinload(Ward.zone)).where(Ward.id == ward_id))
     w = result.scalar_one()
-    return WardOut(
-        id=w.id, name=w.name, number=w.number,
-        zone_id=w.zone_id,
-        zone_name=w.zone.name if w.zone else None,
-        representative_name=w.representative_name,
-        representative_phone=w.representative_phone or [],
-    )
+    return _get_ward_out(w)
 
 
 @router.delete(
@@ -349,13 +365,7 @@ async def create_ward(
     await db.refresh(ward)
     result = await db.execute(select(Ward).options(selectinload(Ward.zone)).where(Ward.id == ward.id))
     w = result.scalar_one()
-    return WardOut(
-        id=w.id, name=w.name, number=w.number,
-        zone_id=w.zone_id,
-        zone_name=w.zone.name if w.zone else None,
-        representative_name=w.representative_name,
-        representative_phone=w.representative_phone or [],
-    )
+    return _get_ward_out(w)
 
 
 # ---------------------------------------------------------------------------

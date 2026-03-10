@@ -69,6 +69,7 @@ document.querySelectorAll('.nav-item').forEach((item) => {
     const titles = {
       dashboard: 'Global Overview',
       map: 'Map View',
+      analytics: 'Analytics & Insights',
       grievances: 'Grievances',
       'ward-performance': 'Ward Performance',
       departments: 'Departments',
@@ -76,9 +77,14 @@ document.querySelectorAll('.nav-item').forEach((item) => {
       workers: 'Officer Management',
       logs: 'System Logs',
     };
+    console.log('Navigating to:', page);
     document.getElementById('page-title').textContent = titles[page] || 'Admin';
     if (page === 'dashboard') loadDashboard();
     if (page === 'map') initCommandCenter();
+    if (page === 'analytics') {
+      console.log('Loading analytics page...');
+      loadDepartmentAnalytics();
+    }
     if (page === 'grievances') {
       populateGrievanceFilters();
       loadGrievances();
@@ -2001,3 +2007,208 @@ document.getElementById('btn-refresh-logs')?.addEventListener('click', loadSyste
 
 renderAuth();
 loadDashboard();
+
+// ---------------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------------
+
+let radarChart = null;
+let dpiBarChart = null;
+let lastDeptAnalyticsData = [];
+
+async function loadDepartmentAnalytics() {
+  const leaderboard = document.getElementById('dept-leaderboard');
+  const tbody = document.getElementById('dept-analytics-tbody');
+  
+  if (leaderboard) leaderboard.innerHTML = '<div class="spinner"></div> Loading…';
+  if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;"><div class="spinner"></div></td></tr>';
+
+  try {
+    console.log('Fetching analytics data...');
+    const data = await api('/analytics/departments');
+    console.log('Analytics data received:', data);
+    
+    // 1. Render Leaderboard
+    if (leaderboard) {
+      if (!data.length) {
+        leaderboard.innerHTML = '<div class="activity-empty">No data available.</div>';
+      } else {
+        leaderboard.innerHTML = data.slice(0, 5).map((d, i) => `
+          <div class="leaderboard-item">
+            <span class="leaderboard-rank">${i+1}</span>
+            <div class="leaderboard-info">
+              <div class="leaderboard-name">${escapeHtml(d.name)}</div>
+              <div class="leaderboard-dpi">DPI: ${d.scores.dpi} · ${d.performance}</div>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+
+    // 2. Render Table
+    if (tbody) {
+      tbody.innerHTML = data.map(d => `
+        <tr>
+          <td><strong>${escapeHtml(d.name)}</strong></td>
+          <td class="text-center">${d.metrics.total}</td>
+          <td class="text-center">${d.metrics.resolved}</td>
+          <td class="text-center">${d.metrics.pending}</td>
+          <td class="text-center">${d.metrics.sla_resolved}</td>
+          <td class="text-center">${d.metrics.total_repeat_count}</td>
+          <td class="text-center">${d.metrics.escalated}</td>
+          <td class="text-right">${(d.scores.resolution_rate * 100).toFixed(1)}%</td>
+          <td class="text-right">${(d.scores.sla_rate * 100).toFixed(1)}%</td>
+          <td class="text-center"><strong>${d.scores.dpi}</strong></td>
+          <td class="text-center"><span class="perf-badge perf-${d.performance.toLowerCase()}">${d.performance}</span></td>
+        </tr>
+      `).join('');
+    }
+
+    // 3. Store for radar dropdown re-render and populate department selector
+    lastDeptAnalyticsData = data;
+    const radarSelect = document.getElementById('radar-dept-select');
+    if (radarSelect) {
+      const currentValue = radarSelect.value;
+      radarSelect.innerHTML = '<option value="">All (top 3)</option>' +
+        data.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)}</option>`).join('');
+      if (currentValue && data.some(d => String(d.id) === currentValue)) radarSelect.value = currentValue;
+    }
+
+    // 4. Render Charts
+    renderAnalyticsCharts(data);
+
+    // 5. Render Math Equations (KaTeX)
+    if (typeof renderMathInElement === 'function') {
+      renderMathInElement(document.getElementById('page-analytics'), {
+        delimiters: [
+          {left: '$$', right: '$$', display: true},
+          {left: '$', right: '$', display: false}
+        ],
+        throwOnError : false
+      });
+    }
+
+  } catch (e) {
+    showToast('Failed to load department analytics', 'error');
+    if (leaderboard) leaderboard.innerHTML = '<div class="activity-empty">Error loading data.</div>';
+  }
+}
+
+function getDpiColor(dpi) {
+  if (dpi >= 90) return '#16a34a'; // Success
+  if (dpi >= 80) return '#0f766e'; // Primary
+  if (dpi >= 70) return '#ca8a04'; // Warning/Mid
+  return '#dc2626'; // Danger
+}
+
+function renderRadarChart(data) {
+  if (!data || !data.length || typeof Chart === 'undefined') return;
+  const radarCtx = document.getElementById('chart-radar');
+  if (!radarCtx) return;
+  const radarSelect = document.getElementById('radar-dept-select');
+  const deptId = radarSelect ? radarSelect.value : '';
+  const radarData = deptId
+    ? data.filter(d => String(d.id) === deptId)
+    : data.slice(0, 3);
+  if (radarChart) radarChart.destroy();
+  radarChart = new Chart(radarCtx, {
+    type: 'radar',
+    data: {
+      labels: ['Res. Rate', 'SLA Rate', 'Pending', 'Quality', 'Escalation'],
+      datasets: radarData.map((d, i) => ({
+        label: d.name,
+        data: [
+          d.scores.resolution_rate * 100,
+          d.scores.sla_rate * 100,
+          d.scores.pending_score * 100,
+          d.scores.recurrence_score * 100,
+          d.scores.escalation_score * 100
+        ],
+        backgroundColor: i === 0 ? 'rgba(15, 118, 110, 0.1)' : 'rgba(100, 116, 139, 0.05)',
+        borderColor: i === 0 ? '#0f766e' : '#64748b',
+        pointBackgroundColor: i === 0 ? '#0f766e' : '#64748b',
+        borderWidth: 2
+      }))
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        r: {
+          beginAtZero: true,
+          max: 100,
+          ticks: { display: false }
+        }
+      },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } }
+      }
+    }
+  });
+}
+
+function renderAnalyticsCharts(data) {
+  if (!data || !data.length) return;
+  if (typeof Chart === 'undefined') {
+    console.warn('Chart.js not loaded yet');
+    return;
+  }
+
+  renderRadarChart(data);
+
+  const top3 = data.slice(0, 3);
+
+  // Distribution Chart
+  const distCtx = document.getElementById('chart-dpi-dist');
+  if (distCtx) {
+    if (dpiBarChart) dpiBarChart.destroy();
+    dpiBarChart = new Chart(distCtx, {
+      type: 'bar',
+      data: {
+        labels: data.map(d => d.name),
+        datasets: [{
+          label: 'DPI Score',
+          data: data.map(d => d.scores.dpi),
+          backgroundColor: data.map(d => getDpiColor(d.scores.dpi)),
+          borderRadius: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { beginAtZero: true, max: 100 },
+          x: { display: false }
+        }
+      }
+    });
+  }
+}
+
+// Sub-tab switching for analytics
+document.querySelectorAll('#page-analytics .tab[data-tab]').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    const t = tab.dataset.tab;
+    document.querySelectorAll('#page-analytics .tab').forEach((x) => x.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelectorAll('#page-analytics .tab-content').forEach((c) => {
+        c.classList.add('hidden');
+        c.classList.remove('active');
+    });
+    const target = document.getElementById(`${t}-content`);
+    if (target) {
+        target.classList.remove('hidden');
+        target.classList.add('active');
+    }
+    if (t === 'analytics-dept') loadDepartmentAnalytics();
+  });
+});
+
+// Radar chart department dropdown: re-render radar when selection changes
+const radarDeptSelect = document.getElementById('radar-dept-select');
+if (radarDeptSelect) {
+  radarDeptSelect.addEventListener('change', () => {
+    if (lastDeptAnalyticsData.length) renderRadarChart(lastDeptAnalyticsData);
+  });
+}

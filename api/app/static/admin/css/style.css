@@ -990,3 +990,254 @@ th[data-sort].sort-desc::after { content: ' ↓'; opacity: 0.9; }
 .perf-pct.perf-mid   { color: #ca8a04; }
 .perf-pct.perf-low   { color: #c2410c; }
 .perf-pct.perf-zero  { color: var(--secondary); }
+/* ── Analytics Page ── */
+.analytics-layout {
+  display: grid;
+  grid-template-columns: 350px 1fr;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.leaderboard-panel {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+}
+
+.leaderboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.leaderboard-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem;
+  border-radius: var(--radius);
+  background: #f8fafc;
+  border: 1px solid var(--border);
+}
+
+.leaderboard-rank {
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: var(--secondary);
+  width: 24px;
+}
+
+.leaderboard-info {
+  flex: 1;
+}
+
+.leaderboard-name {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.leaderboard-dpi {
+  font-size: 0.85rem;
+  color: var(--secondary);
+}
+
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 1.5rem;
+}
+
+
+
+/* Methodology Panel - Admin Panel Sync */
+.methodology-panel {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+  margin-top: 2rem;
+}
+
+.methodology-panel .panel-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  color: #1e293b;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.75rem;
+}
+
+.formula-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.5rem;
+}
+
+.formula-card {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+
+.formula-card h4 {
+  margin-bottom: 1rem;
+  color: var(--primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.formula-explanation-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.formula-explanation-list li {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  padding: 0.7rem 0;
+  min-height: 2.75rem;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  align-items: start;
+  gap: 0 0.5rem;
+}
+
+.formula-explanation-list li:last-child {
+  padding-bottom: 0;
+}
+
+.formula-explanation-list li strong {
+  color: #1e293b;
+  font-weight: 600;
+}
+
+.formula-explanation-list li span {
+  color: var(--secondary);
+}
+
+.formula-wide {
+  grid-column: 1 / -1;
+  background: #f1f5f9;
+  border: 1px solid var(--border);
+}
+
+.dpi-formula {
+  font-size: 1.5rem;
+  padding: 1rem 0;
+  color: var(--primary);
+  text-align: center;
+  font-weight: 600;
+}
+
+.formula-note {
+  font-size: 0.82rem;
+  color: var(--secondary);
+  text-align: center;
+  margin-top: 0.75rem;
+  padding: 0.5rem;
+  background: #fff;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-left: 4px solid #ca8a04;
+}
+
+.katex { font-size: 1.1em !important; }
+
+.text-center { text-align: center !important; }
+.text-right { text-align: right !important; }
+
+.perf-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  display: inline-block;
+}
+
+.perf-badge.perf-excellent { background: #d1fae5; color: #065f46; }
+.perf-badge.perf-good { background: #dcfce7; color: #166534; }
+.perf-badge.perf-average { background: #fef9c3; color: #854d0e; }
+.perf-badge.perf-poor { background: #ffedd5; color: #9a3412; }
+.perf-badge.perf-critical { background: #fee2e2; color: #991b1b; }
+
+@media (max-width: 992px) {
+  .formula-grid { grid-template-columns: 1fr; }
+  .formula-explanation-list li { grid-template-columns: 80px 1fr; }
+}
+
+.chart-card {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+}
+
+.chart-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.chart-card-header h4 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.chart-dept-select {
+  min-width: 160px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
+  color: var(--text);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.chart-card h4 {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.perf-good { color: var(--success); font-weight: 600; }
+.perf-mid { color: #ca8a04; font-weight: 600; }
+.perf-low { color: #ea580c; font-weight: 600; }
+.perf-critical { color: var(--danger); font-weight: 600; }
+
+.analytics-tab-navbar {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+}
+
+.analytics-tab-navbar .tab {
+    border: none;
+    background: transparent;
+    border-radius: 0;
+    padding: 0.5rem 1rem;
+    font-weight: 500;
+    color: var(--secondary);
+}
+
+.analytics-tab-navbar .tab.active {
+    color: var(--primary);
+    border-bottom: 2px solid var(--primary);
+    background: transparent;
+}

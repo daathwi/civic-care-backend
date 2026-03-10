@@ -23,7 +23,7 @@ worker_status_enum = ENUM(
     name="worker_status", create_type=False,
 )
 complaint_status_enum = ENUM(
-    "pending", "assigned", "inprogress", "resolved",
+    "pending", "assigned", "inprogress", "resolved", "escalated",
     name="complaint_status", create_type=False,
 )
 complaint_priority_enum = ENUM(
@@ -191,6 +191,8 @@ class Grievance(Base):
     upvotes_count = Column(Integer, default=0)
     downvotes_count = Column(Integer, default=0)
     is_sensitive = Column(Boolean, default=False)
+    citizen_rating = Column(Integer, nullable=True)
+    reopen_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
@@ -202,6 +204,7 @@ class Grievance(Base):
     comments = relationship("GrievanceComment", back_populates="grievance", order_by="GrievanceComment.created_at")
     assignments = relationship("Assignment", back_populates="grievance", order_by="Assignment.assigned_at.desc()")
     audit_logs = relationship("AuditLog", back_populates="grievance", order_by="AuditLog.created_at")
+    conversation = relationship("Conversation", back_populates="grievance", uselist=False, cascade="all, delete-orphan")
 
 
 class GrievanceMedia(Base):
@@ -303,15 +306,49 @@ class AttendanceRecord(Base):
     user = relationship("User")
 
 
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=True)  # Optional name for group chats
+    type = Column(String(50), default="dm")    # "dm", "department", or "task"
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
+    grievance_id = Column(UUID(as_uuid=True), ForeignKey("grievances.id", ondelete="CASCADE"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("grievance_id", "type", name="uq_grievance_conversation_type"),
+    )
+
+    participants = relationship("ConversationParticipant", back_populates="conversation", cascade="all, delete-orphan")
+    messages = relationship("InternalMessage", back_populates="conversation", order_by="InternalMessage.created_at")
+    grievance = relationship("Grievance", back_populates="conversation")
+
+
+class ConversationParticipant(Base):
+    __tablename__ = "conversation_participants"
+
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    unread_count = Column(Integer, default=0)
+    joined_at = Column(DateTime(timezone=True), default=_utcnow)
+
+    conversation = relationship("Conversation", back_populates="participants")
+    user = relationship("User")
+
+
 class InternalMessage(Base):
     __tablename__ = "internal_messages"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True)
     sender_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    receiver_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    receiver_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True) # Keep for migration/compatibility
     content = Column(Text, nullable=False)
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
+    conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", foreign_keys=[sender_id])
     receiver = relationship("User", foreign_keys=[receiver_id])

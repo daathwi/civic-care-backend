@@ -3,12 +3,18 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-GrievanceStatus = Literal["pending", "assigned", "inprogress", "resolved"]
+class ComplaintStatus(str, Enum):
+    pending = "pending"
+    assigned = "assigned"
+    inprogress = "inprogress"
+    resolved = "resolved"
+    escalated = "escalated"
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +67,8 @@ class AssignmentOut(BaseModel):
     assigned_to_name: str | None = Field(None, description="Field assistant display name.")
     assigned_to_phone: str | None = Field(None, description="Field assistant phone.")
     assigned_by_id: uuid.UUID | None = Field(None, description="User who assigned (manager/admin) UUID.")
+    assigned_by_name: str | None = Field(None, description="Name of the user who assigned.")
+    assigned_by_phone: str | None = Field(None, description="Phone of the user who assigned.")
     status: str = Field(..., description="pending, accepted, in_progress, or completed.")
     assigned_at: datetime = Field(..., description="When the assignment was created.")
     completed_at: datetime | None = Field(None, description="When the assignment was completed (if resolved).")
@@ -88,12 +96,15 @@ class GrievanceListItem(BaseModel):
     ward_name: str | None = Field(None, description="Ward name.")
     ward_number: int | None = Field(None, description="Ward number.")
     reporter_name: str | None = Field(None, description="Name of the citizen who reported.")
+    reporter_phone: str | None = Field(None, description="Phone number of the citizen who reported.")
     upvotes_count: int = Field(..., description="Number of upvotes.")
     downvotes_count: int = Field(..., description="Number of downvotes.")
     created_at: datetime = Field(..., description="When the grievance was created.")
     image_url: str | None = Field(None, description="URL of the first non-resolution image.")
     audio_url: str | None = Field(None, description="URL of the first audio recording.")
     is_sensitive: bool = Field(False, description="True if the image contains disturbing content.")
+    citizen_rating: int | None = Field(None, description="Citizen's rating of the resolution (1-5). None if not yet rated.")
+    reopen_count: int = Field(0, description="Number of times reopened due to poor rating.")
     assigned_to_name: str | None = Field(None, description="Name of the currently assigned field assistant.")
     assigned_to_id: uuid.UUID | None = Field(None, description="UUID of the currently assigned field assistant.")
 
@@ -103,6 +114,8 @@ class GrievanceDetail(GrievanceListItem):
 
     reporter_id: uuid.UUID | None = Field(None, description="Reporter user UUID.")
     worker_contact: str | None = Field(None, description="Phone of the assigned field assistant.")
+    assigned_by_name: str | None = Field(None, description="Name of the manager/admin who assigned.")
+    assigned_by_phone: str | None = Field(None, description="Phone of the manager/admin who assigned.")
     resolution_image_url: str | None = Field(None, description="URL of resolution proof image (deprecated; use resolution_media_url).")
     resolution_media_url: str | None = Field(None, description="URL of resolution proof media when status is resolved.")
     comments: list[CommentOut] = Field(default_factory=list, description="Comments on the grievance.")
@@ -134,7 +147,7 @@ class GrievanceCreate(BaseModel):
 class GrievanceUpdate(BaseModel):
     """Request body for updating a grievance. Access: fieldAssistant or admin only (not fieldManager)."""
 
-    status: GrievanceStatus | None = Field(None, description="New status: pending, assigned, inprogress, or resolved.")
+    status: ComplaintStatus | None = Field(None, description="New status: pending, assigned, inprogress, or resolved.")
     priority: str | None = Field(None, description="New priority: low, medium, or high.")
     resolution_image_url: str | None = Field(None, description="URL of resolution proof image (when marking resolved).")
     note: str | None = Field(None, description="Optional note for the status update.")
@@ -144,6 +157,12 @@ class AssignWorkerRequest(BaseModel):
     """Request body for assigning a field assistant to a grievance. Access: fieldManager or admin."""
 
     worker_id: uuid.UUID = Field(..., description="UUID of the field assistant to assign.")
+
+
+class RateGrievanceRequest(BaseModel):
+    """Request body for rating a resolved grievance. Access: original reporter only."""
+
+    rating: int = Field(..., ge=1, le=5, description="Rating from 1 to 5. If < 3, grievance is reopened.")
 
 
 class VoteRequest(BaseModel):

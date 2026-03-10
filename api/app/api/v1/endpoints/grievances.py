@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import get_current_user, require_can_update_grievance, require_manager
 from app.db.database import get_db
@@ -15,13 +16,13 @@ from app.services.ward_lookup import lookup_ward_by_coords
 from app.models.models import (
     Assignment, AuditLog, Grievance, GrievanceCategory,
     GrievanceComment, GrievanceMedia, GrievanceVote,
-    User, Ward, WorkerProfile,
+    User, Ward, WorkerProfile, Conversation
 )
 from app.schemas.grievance import (
     AssignWorkerRequest, AssignmentOut, AuditLogOut,
     CommentCreate, CommentOut, GrievanceCreate, GrievanceDetail,
     GrievanceListItem, GrievanceUpdate, MediaOut,
-    PaginatedGrievances, VoteRequest,
+    PaginatedGrievances, RateGrievanceRequest, VoteRequest,
 )
 from app.api.v1.endpoints.chat import broadcast_comment
 
@@ -35,19 +36,21 @@ router = APIRouter(prefix="/grievances", tags=["grievances"])
 # Icon names for audit log events; must match Flutter iconFromApi() in grievance_mappers.dart.
 def _audit_icon_for_event(title: str | None = None, status: str | None = None) -> str:
     """Return the icon_name to store for an audit log entry. Used whenever any role writes an AuditLog."""
-    t = (title or "").strip().lower()
-    s = (status or "").strip().lower()
+    t = (str(title) if title is not None else "").strip().lower()
+    # Normalize status to string if it's an enum member
+    s_val = str(status.value if hasattr(status, "value") else (status or "")).strip().lower()
+    
     if "registered" in t or "created" in t or "complaint" in t:
         return "article_outlined"
     if "assigned" in t or "assignment" in t:
         return "assignment_ind_rounded"
-    if s == "resolved" or "resolved" in t or "completed" in t:
+    if s_val == "resolved" or "resolved" in t or "completed" in t:
         return "check_circle_outline_rounded"
-    if s == "inprogress" or "in progress" in t or "ongoing" in t:
+    if s_val == "inprogress" or "in progress" in t or "ongoing" in t:
         return "update_rounded"
-    if s == "pending" or "pending" in t:
+    if s_val == "pending" or "pending" in t:
         return "schedule_rounded"
-    if s == "assigned":
+    if s_val == "assigned":
         return "assignment_ind_rounded"
     # Default for generic "Updated" or unknown
     return "update_rounded"
@@ -80,12 +83,15 @@ def _to_list_item(g: Grievance) -> GrievanceListItem:
         ward_name=g.ward.name if g.ward else None,
         ward_number=g.ward.number if g.ward else None,
         reporter_name=g.reporter.name if g.reporter else None,
+        reporter_phone=g.reporter.phone if g.reporter else None,
         upvotes_count=g.upvotes_count,
         downvotes_count=g.downvotes_count,
         created_at=g.created_at,
         image_url=first_image,
         audio_url=first_audio,
         is_sensitive=g.is_sensitive,
+        citizen_rating=g.citizen_rating,
+        reopen_count=g.reopen_count,
         assigned_to_name=active.assigned_to.name if active and active.assigned_to else None,
         assigned_to_id=active.assigned_to_id if active else None,
     )
@@ -127,6 +133,8 @@ def _to_detail(g: Grievance) -> GrievanceDetail:
             assigned_to_name=a.assigned_to.name if a.assigned_to else None,
             assigned_to_phone=a.assigned_to.phone if a.assigned_to else None,
             assigned_by_id=a.assigned_by_id,
+            assigned_by_name=a.assigned_by.name if a.assigned_by else None,
+            assigned_by_phone=a.assigned_by.phone if a.assigned_by else None,
             status=a.status,
             assigned_at=a.assigned_at,
             completed_at=a.completed_at,
@@ -149,14 +157,19 @@ def _to_detail(g: Grievance) -> GrievanceDetail:
         ward_number=g.ward.number if g.ward else None,
         reporter_id=g.reporter_id,
         reporter_name=g.reporter.name if g.reporter else None,
+        reporter_phone=g.reporter.phone if g.reporter else None,
         upvotes_count=g.upvotes_count,
         downvotes_count=g.downvotes_count,
         created_at=g.created_at,
         image_url=first_image,
         is_sensitive=g.is_sensitive,
+        citizen_rating=g.citizen_rating,
+        reopen_count=g.reopen_count,
         assigned_to_name=active.assigned_to.name if active and active.assigned_to else None,
         assigned_to_id=active.assigned_to_id if active else None,
         worker_contact=active.assigned_to.phone if active and active.assigned_to else None,
+        assigned_by_name=active.assigned_by.name if active and active.assigned_by else None,
+        assigned_by_phone=active.assigned_by.phone if active and active.assigned_by else None,
         resolution_image_url=resolution_img,
         resolution_media_url=resolution_img,
         comments=comments_out,
@@ -171,13 +184,15 @@ _GRIEVANCE_LOAD_OPTIONS = [
     selectinload(Grievance.ward),
     selectinload(Grievance.reporter),
     selectinload(Grievance.media),
-    selectinload(Grievance.assignments).selectinload(Assignment.assigned_to),
+    selectinload(Grievance.assignments).selectinload(Assignment.assigned_to).selectinload(User.worker_profile),
+    selectinload(Grievance.assignments).selectinload(Assignment.assigned_by),
 ]
 
 _GRIEVANCE_DETAIL_OPTIONS = [
     *_GRIEVANCE_LOAD_OPTIONS,
     selectinload(Grievance.comments).selectinload(GrievanceComment.user),
     selectinload(Grievance.audit_logs),
+    selectinload(Grievance.conversation),
 ]
 
 
@@ -200,6 +215,7 @@ async def list_grievances(
     priority: str | None = Query(None, description="Filter by priority: low, medium, high."),
     category_dept: uuid.UUID | None = Query(None, description="Filter by category's department UUID."),
     reporter_id: uuid.UUID | None = Query(None, description="Filter by reporter user UUID."),
+    worker_id: uuid.UUID | None = Query(None, description="Filter by assigned worker UUID."),
     skip: int = Query(0, ge=0, description="Number of items to skip (offset)."),
     limit: int = Query(10, ge=1, le=100, description="Page size (default 10)."),
 ):
@@ -230,6 +246,9 @@ async def list_grievances(
     if reporter_id:
         query = query.where(Grievance.reporter_id == reporter_id)
         count_query = count_query.where(Grievance.reporter_id == reporter_id)
+    if worker_id:
+        query = query.join(Grievance.assignments).where(Assignment.assigned_to_id == worker_id)
+        count_query = count_query.join(Grievance.assignments).where(Assignment.assigned_to_id == worker_id)
 
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
@@ -260,7 +279,7 @@ async def create_grievance(
     user: User = Depends(get_current_user),
 ):
     # Reject if location is outside Delhi ward boundaries (gpkg)
-    ward_info = get_ward_from_location(float(body.lat), float(body.lng))
+    ward_info = await run_in_threadpool(get_ward_from_location, float(body.lat), float(body.lng))
     if not ward_info:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -378,18 +397,22 @@ async def update_grievance(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_can_update_grievance),
 ):
+    print(f"DEBUG: Updating grievance {grievance_id} with body: {body}")
     result = await db.execute(
         select(Grievance).options(*_GRIEVANCE_DETAIL_OPTIONS).where(Grievance.id == grievance_id)
     )
     g = result.scalar_one_or_none()
     if not g:
+        print(f"DEBUG: Grievance {grievance_id} not found")
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Grievance not found")
 
     if body.status:
+        print(f"DEBUG: Setting status from {g.status} to {body.status}")
         g.status = body.status
     if body.priority:
         g.priority = body.priority
     if body.resolution_image_url:
+        print(f"DEBUG: Adding resolution image: {body.resolution_image_url}")
         db.add(GrievanceMedia(
             grievance_id=g.id, media_url=body.resolution_image_url,
             is_resolution_proof=True,
@@ -398,29 +421,40 @@ async def update_grievance(
     note_text = body.note or f"Status updated to {body.status or g.status}"
     db.add(AuditLog(
         grievance_id=g.id,
-        title=body.status or "Updated",
+        title=str(body.status.value if hasattr(body.status, "value") else (body.status or "Updated")),
         description=note_text,
         icon_name=_audit_icon_for_event(title=body.status or "Updated", status=body.status),
         actor_id=user.id,
     ))
     g.updated_at = datetime.now(timezone.utc)
 
-    if body.status == "resolved":
+    if body.status and body.status.value == "resolved":
+        g.citizen_rating = None  # Clear previous rating to allow re-rating
+        print(f"DEBUG: Resolving grievance, updating assignments...")
         for assignment in g.assignments:
             if assignment.status != "completed":
+                print(f"DEBUG: Completing assignment {assignment.id}")
                 assignment.status = "completed"
                 assignment.completed_at = datetime.now(timezone.utc)
                 if assignment.assigned_to and assignment.assigned_to.worker_profile:
                     wp = assignment.assigned_to.worker_profile
                     wp.tasks_completed = (wp.tasks_completed or 0) + 1
                     wp.tasks_active = max((wp.tasks_active or 1) - 1, 0)
+        
+        # Delete associated conversation when resolved
+        if g.conversation:
+            print(f"DEBUG: Deleting conversation {g.conversation.id}")
+            await db.delete(g.conversation)
 
+    print(f"DEBUG: Committing changes for grievance {grievance_id}")
     await db.commit()
 
     fresh = await db.execute(
         select(Grievance).options(*_GRIEVANCE_DETAIL_OPTIONS).where(Grievance.id == g.id)
     )
-    return _to_detail(fresh.scalar_one())
+    res_obj = fresh.scalar_one()
+    print(f"DEBUG: Update complete. Final status: {res_obj.status}")
+    return _to_detail(res_obj)
 
 
 @router.post(
@@ -454,6 +488,18 @@ async def assign_worker(
     if not worker:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Field assistant not found or not a field assistant")
 
+    # ── Close any existing active assignments (reassignment) ──────────────
+    previous_worker_name = None
+    for old_assignment in (g.assignments or []):
+        if old_assignment.status not in ("completed",):
+            old_assignment.status = "completed"
+            old_assignment.completed_at = datetime.now(timezone.utc)
+            if old_assignment.assigned_to:
+                previous_worker_name = old_assignment.assigned_to.name
+                if old_assignment.assigned_to.worker_profile:
+                    wp = old_assignment.assigned_to.worker_profile
+                    wp.tasks_active = max((wp.tasks_active or 1) - 1, 0)
+
     assignment = Assignment(
         grievance_id=g.id,
         assigned_to_id=worker.id,
@@ -467,13 +513,23 @@ async def assign_worker(
     if worker.worker_profile:
         worker.worker_profile.tasks_active = (worker.worker_profile.tasks_active or 0) + 1
 
-    db.add(AuditLog(
-        grievance_id=g.id,
-        title="Assigned to Field Assistant",
-        description=f"Ticket assigned to {worker.name}.",
-        icon_name=_audit_icon_for_event(title="Assigned to Field Assistant"),
-        actor_id=user.id,
-    ))
+    # Audit log — differentiate new assignment vs reassignment
+    if previous_worker_name:
+        db.add(AuditLog(
+            grievance_id=g.id,
+            title="Reassigned to Field Assistant",
+            description=f"Ticket reassigned from {previous_worker_name} to {worker.name}.",
+            icon_name=_audit_icon_for_event(title="Assigned to Field Assistant"),
+            actor_id=user.id,
+        ))
+    else:
+        db.add(AuditLog(
+            grievance_id=g.id,
+            title="Assigned to Field Assistant",
+            description=f"Ticket assigned to {worker.name}.",
+            icon_name=_audit_icon_for_event(title="Assigned to Field Assistant"),
+            actor_id=user.id,
+        ))
 
     await db.commit()
 
@@ -613,3 +669,61 @@ async def add_comment(
     ))
 
     return comment_out
+
+
+@router.post(
+    "/{grievance_id}/rate",
+    response_model=GrievanceDetail,
+    summary="Rate resolved grievance",
+    description="Rate a resolved grievance (1-5 stars). Only the original reporter can rate. If rating < 3, grievance is reopened to pending. **Access:** original reporter (Bearer required).",
+    response_description="Updated grievance detail.",
+)
+async def rate_grievance(
+    grievance_id: uuid.UUID,
+    body: RateGrievanceRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Grievance).options(*_GRIEVANCE_DETAIL_OPTIONS).where(Grievance.id == grievance_id)
+    )
+    g = result.scalar_one_or_none()
+    if not g:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Grievance not found")
+
+    if g.reporter_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the original reporter can rate this grievance")
+
+    if g.status != "resolved":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only resolved grievances can be rated")
+
+    g.citizen_rating = body.rating
+    g.updated_at = datetime.now(timezone.utc)
+
+    if body.rating < 3:
+        # Reopen the grievance — citizen is unsatisfied
+        g.status = "pending"
+        g.citizen_rating = body.rating  # Keep the rating for record
+        g.reopen_count = (g.reopen_count or 0) + 1
+        db.add(AuditLog(
+            grievance_id=g.id,
+            title="Reopened — Low Rating",
+            description=f"Citizen rated resolution {body.rating}/5. Ticket reopened for review.",
+            icon_name=_audit_icon_for_event(title="pending", status="pending"),
+            actor_id=user.id,
+        ))
+    else:
+        db.add(AuditLog(
+            grievance_id=g.id,
+            title="Citizen Rated Resolution",
+            description=f"Citizen rated the resolution {body.rating}/5.",
+            icon_name=_audit_icon_for_event(title="Resolved", status="resolved"),
+            actor_id=user.id,
+        ))
+
+    await db.commit()
+
+    fresh = await db.execute(
+        select(Grievance).options(*_GRIEVANCE_DETAIL_OPTIONS).where(Grievance.id == g.id)
+    )
+    return _to_detail(fresh.scalar_one())

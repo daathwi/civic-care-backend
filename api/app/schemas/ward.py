@@ -41,6 +41,12 @@ class WardOut(BaseModel):
     zone_name: str | None = Field(None, description="Zone name.")
     representative_name: str | None = Field(None, description="Ward representative name.")
     representative_phone: list[str] = Field(default_factory=list, description="Ward representative phone numbers.")
+    centroid_lat: float | None = Field(None, description="Centroid latitude of the ward polygon.")
+    centroid_lng: float | None = Field(None, description="Centroid longitude of the ward polygon.")
+    min_lat: float | None = Field(None, description="Minimum latitude of the ward bounds.")
+    max_lat: float | None = Field(None, description="Maximum latitude of the ward bounds.")
+    min_lng: float | None = Field(None, description="Minimum longitude of the ward bounds.")
+    max_lng: float | None = Field(None, description="Maximum longitude of the ward bounds.")
 
     @field_validator("representative_phone", mode="before")
     @classmethod

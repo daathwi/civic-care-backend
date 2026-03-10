@@ -27,6 +27,7 @@ from app.schemas.auth import (
     UserOut,
 )
 from app.api.deps import get_current_user
+from starlette.concurrency import run_in_threadpool
 from app.services.delhi_ward_lookup import get_ward_from_location
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -67,7 +68,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
             ward_display = ward_obj.name
 
     if not ward_display and not zone_display and body.lat is not None and body.lng is not None:
-        loc_info = get_ward_from_location(body.lat, body.lng)
+        loc_info = await run_in_threadpool(get_ward_from_location, body.lat, body.lng)
         if loc_info:
             ward_display = loc_info.get("ward_display") or None
             zone_display = loc_info.get("zone_display") or None

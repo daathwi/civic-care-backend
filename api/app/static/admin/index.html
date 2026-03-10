@@ -8,6 +8,9 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
   <link rel="stylesheet" href="/static/admin/css/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
 </head>
 <body>
   <div class="app">
@@ -16,6 +19,7 @@
       <nav class="sidebar-nav">
         <a href="#" class="nav-item active" data-page="dashboard">Global Overview</a>
         <a href="#" class="nav-item" data-page="map">Map View</a>
+        <a href="#" class="nav-item" data-page="analytics">Analytics</a>
         <a href="#" class="nav-item" data-page="grievances">Grievances</a>
         <a href="#" class="nav-item" data-page="ward-performance">Ward Performance</a>
         <a href="#" class="nav-item" data-page="workers">Officer Management</a>
@@ -92,7 +96,6 @@
                 <h3 class="panel-title">Status Breakdown</h3>
               </div>
               <div id="status-breakdown" class="breakdown-bars"></div>
-            </div>
           </div>
         </section>
         <section id="page-map" class="page">
@@ -436,6 +439,108 @@
             </table>
           </div>
         </section>
+        <section id="page-analytics" class="page">
+          <div class="analytics-tab-navbar">
+            <button type="button" class="tab active" data-tab="analytics-dept">Departments</button>
+            <button type="button" class="tab" data-tab="analytics-wards">Wards</button>
+            <button type="button" class="tab" data-tab="analytics-zones">Zones</button>
+            <button type="button" class="tab" data-tab="analytics-sustainability">Sustainability</button>
+          </div>
+          <div id="analytics-dept-content" class="tab-content active">
+            <div class="analytics-layout">
+              <aside class="leaderboard-panel">
+                <h3 class="panel-title">Department Leaderboard (by DPI)</h3>
+                <div id="dept-leaderboard" class="leaderboard-list">
+                  <div class="activity-empty">Loading analytics…</div>
+                </div>
+              </aside>
+              <div class="charts-grid">
+                <div class="chart-card">
+                  <div class="chart-card-header">
+                    <h4>Metric Composition (Radar)</h4>
+                    <select id="radar-dept-select" class="chart-dept-select" aria-label="Select department">
+                      <option value="">All (top 3)</option>
+                    </select>
+                  </div>
+                  <div style="height: 300px; position: relative;">
+                    <canvas id="chart-radar"></canvas>
+                  </div>
+                </div>
+                <div class="chart-card">
+                  <h4>Performance Distribution</h4>
+                  <div style="height: 300px; position: relative;">
+                    <canvas id="chart-dpi-dist"></canvas>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <div class="table-toolbar">
+                <h3 class="panel-title">In-depth Metrics</h3>
+              </div>
+              <table class="data-table" id="dept-analytics-table">
+                <thead>
+                  <tr>
+                    <th>Department</th>
+                    <th class="text-center">Inflow ($T$)</th>
+                    <th class="text-center">Resolutions ($R$)</th>
+                    <th class="text-center">Caseload ($P$)</th>
+                    <th class="text-center">Compliance ($S$)</th>
+                    <th class="text-center">Recurrence ($\sum Ri$)</th>
+                    <th class="text-center">Escalations ($E$)</th>
+                    <th class="text-right">Efficiency</th>
+                    <th class="text-right">Velocity</th>
+                    <th class="text-center">DPI</th>
+                    <th class="text-center">Performance Status</th>
+                  </tr>
+                </thead>
+                <tbody id="dept-analytics-tbody"></tbody>
+              </table>
+            </div>
+            <div class="methodology-panel">
+              <h3 class="panel-title">Analytical Methodology & Performance Framework</h3>
+              <div class="formula-grid">
+                <div class="formula-card">
+                  <h4>Metric Dimensions</h4>
+                  <ul class="formula-explanation-list">
+                    <li><strong>$T$ (Inflow)</strong> <span>Total volume of grievances received during the reporting period.</span></li>
+                    <li><strong>$R$ (Resolutions)</strong> <span>Gross volume of grievances successfully processed and closed.</span></li>
+                    <li><strong>$P$ (Caseload)</strong> <span>Current active workload consisting of pending and assigned tasks.</span></li>
+                    <li><strong>$S$ (Compliance)</strong> <span>Volume of resolutions ($R$) successfully completed within the 48-hour SLA.</span></li>
+                    <li><strong>$\sum Ri$ (Recurrence)</strong> <span>Aggregate intensity of grievances requiring redundant intervention.</span></li>
+                    <li><strong>$E$ (Escalations)</strong> <span>Volume requiring administrative intervention at higher hierarchical levels.</span></li>
+                  </ul>
+                </div>
+                <div class="formula-card">
+                  <h4>Performance Coefficients</h4>
+                  <ul class="formula-explanation-list">
+                    <li><strong>Resolution Efficiency</strong> <span>$\frac{R}{T}$: Quantifies gross output against total organizational demand.</span></li>
+                    <li><strong>Service Velocity</strong> <span>$\frac{S}{R}$: Quantifies the timeliness of completed work (Adherence Rate).</span></li>
+                    <li><strong>Caseload Health</strong> <span>$1 - \frac{P}{T}$: Evaluates the stability of the current department backlog.</span></li>
+                    <li><strong>Resolution Integrity</strong> <span>$1 - \frac{\sum Ri}{R}$: Evaluates resolution accuracy and quality control.</span></li>
+                    <li><strong>Escalation Mitigation</strong> <span>$1 - \frac{E}{T}$: Evaluates the department's ability to resolve issues locally.</span></li>
+                  </ul>
+                </div>
+                <div class="formula-card formula-wide">
+                  <h4>Department Performance Index (DPI)</h4>
+                  <div class="dpi-formula">
+                    $DPI = (30\% \cdot \text{Res}) + (25\% \cdot \text{SLA}) + (20\% \cdot \text{Caseload}) + (15\% \cdot \text{Quality}) + (10\% \cdot \text{Escalation})$
+                  </div>
+                  <p class="formula-note"><strong>Administrative Note:</strong> Departments with zero grievance inflow ($T=0$) are assigned a baseline performance index of <strong>70.0</strong> to reflect organizational stability during inactive periods.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="analytics-wards-content" class="tab-content hidden">
+            <div class="activity-empty">Ward level deep analysis coming soon.</div>
+          </div>
+          <div id="analytics-zones-content" class="tab-content hidden">
+            <div class="activity-empty">Zone level comparative analytics coming soon.</div>
+          </div>
+          <div id="analytics-sustainability-content" class="tab-content hidden">
+            <div class="activity-empty">Sustainability & Long-term impact metrics coming soon.</div>
+          </div>
+        </section>
         <section id="page-logs" class="page">
           <div class="toolbar">
             <input type="text" id="logs-search" placeholder="Search grievance title…" />
@@ -638,6 +743,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
-  <script src="/static/admin/js/app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="/static/admin/js/app.js?v=1.0.1"></script>
 </body>
 </html>
