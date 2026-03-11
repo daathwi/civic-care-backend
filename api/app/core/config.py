@@ -27,8 +27,8 @@ class Settings(BaseSettings):
         if self.DELHI_WARDS_GPKG_PATH:
             p = Path(self.DELHI_WARDS_GPKG_PATH)
             return p if p.is_absolute() else (Path.cwd() / p).resolve()
-        if _DEFAULT_GPKG.exists():
-            return _DEFAULT_GPKG
+        if DEFAULT_GPKG.exists():
+            return DEFAULT_GPKG
         return None
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
