@@ -20,6 +20,6 @@ dependencies = [
     "sqlalchemy>=2.0.47",
 ]
 
-[tool.uv.scripts]
-# Run with: uv run start (from backend/api). Binds to 0.0.0.0 so Network URL works.
-start = "uvicorn main:app --reload --host 0.0.0.0"
+[project.scripts]
+start = "api.main:start"
+

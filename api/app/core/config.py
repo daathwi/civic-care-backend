@@ -3,7 +3,8 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Default path to Delhi wards GeoPackage (relative to this file: api/app/core -> testing/backend_tests)
-_DEFAULT_GPKG = (Path(__file__).resolve().parent / ".." / ".." / ".." / ".." / ".." / "backend_tests" / "delhi_wards.gpkg").resolve()
+BASE_DIR = Path(__file__).resolve().parents[3]
+DEFAULT_GPKG = BASE_DIR / "data" / "delhi_wards.gpkg"
 
 
 class Settings(BaseSettings):

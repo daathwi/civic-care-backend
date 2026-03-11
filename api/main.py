@@ -15,7 +15,6 @@ from fastapi.responses import FileResponse
 
 from app.core.config import settings
 from app.api.v1.router import api_router
-from app.db.init_db import init_db
 from app.middleware import RequestResponseLoggerMiddleware
 
 STATIC_DIR = Path(__file__).resolve().parent / "app" / "static"
@@ -39,13 +38,6 @@ def _get_network_ip() -> str | None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create enum types and tables on startup (idempotent)
-    try:
-        await init_db()
-        logger.info("Database tables initialized")
-    except Exception as e:
-        logger.exception("Failed to initialize database: %s", e)
-        raise
     # Print URLs to console (network URL works only if server was started with --host 0.0.0.0)
     port = os.environ.get("PORT", "8000")
     network_ip = _get_network_ip()
@@ -140,14 +132,15 @@ def admin_dashboard():
 async def health_check():
     return {"status": "ok", "service": settings.PROJECT_NAME, "version": settings.VERSION}
 
-
-if __name__ == "__main__":
+def start():
     import uvicorn
     port = int(os.environ.get("PORT", "8000"))
-    # Bind to 0.0.0.0 so Android emulator (10.0.2.2) and other devices on the network can connect.
     uvicorn.run(
-        "app.main:app",
+        "api.main:app",
         host="0.0.0.0",
         port=port,
-        reload=True,
+        reload=True
     )
+
+if __name__ == "__main__":
+    start()
