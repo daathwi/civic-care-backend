@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column, String, Integer, Text, Boolean, DateTime, Date,
-    ForeignKey, Numeric, UniqueConstraint,
+    ForeignKey, Numeric, UniqueConstraint, Index,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, UUID, JSONB, ENUM
 from sqlalchemy.orm import relationship
@@ -58,6 +58,18 @@ class Zone(Base):
     wards = relationship("Ward", back_populates="zone")
 
 
+class PoliticalParty(Base):
+    """Political party for ward representatives. Used for party-level analytics."""
+    __tablename__ = "political_parties"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False)
+    short_code = Column(String(50), nullable=True)
+    color = Column(String(10), nullable=True)
+
+    wards = relationship("Ward", back_populates="party")
+
+
 class Ward(Base):
     __tablename__ = "wards"
 
@@ -68,8 +80,12 @@ class Ward(Base):
     polygon_geojson = Column(JSONB)
     representative_name = Column(String(255), nullable=True)
     representative_phone = Column(ARRAY(String), nullable=True)  # list of phone numbers
+    party_id = Column(UUID(as_uuid=True), ForeignKey("political_parties.id", ondelete="SET NULL"), nullable=True)
+    representative_party = Column(String(255), nullable=True)  # deprecated: use party_id; kept for migration fallback
+    representative_email = Column(String(255), nullable=True)
 
     zone = relationship("Zone", back_populates="wards")
+    party = relationship("PoliticalParty", back_populates="wards")
 
 
 class Department(Base):
@@ -83,6 +99,8 @@ class Department(Base):
     manager_title = Column(String(100), nullable=False)
     assistant_title = Column(String(100), nullable=False)
     jurisdiction_label = Column(String(50), nullable=False)
+    sdg = Column(String(100), nullable=True)
+    description = Column(Text, nullable=True)
 
     categories = relationship("GrievanceCategory", back_populates="department")
 
@@ -107,6 +125,8 @@ class User(Base):
     zone_id = Column(UUID(as_uuid=True), ForeignKey("zones.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    last_updated_cis = Column(DateTime(timezone=True), nullable=True)
+    cis_score = Column(Numeric(6, 2), nullable=True)
 
     worker_profile = relationship(
         "WorkerProfile",
@@ -116,6 +136,46 @@ class User(Base):
         cascade="all, delete-orphan",
     )
     refresh_tokens = relationship("RefreshToken", back_populates="user")
+    cis_snapshots = relationship(
+        "CivicImpactScoreSnapshot",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+
+class CisSchedulerState(Base):
+    """Singleton row (id=1): anchors rolling CIS periods and next automatic run (IST wall-clock +7d)."""
+
+    __tablename__ = "cis_scheduler_state"
+
+    id = Column(Integer, primary_key=True)
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    next_run_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class CivicImpactScoreSnapshot(Base):
+    """
+    Stored Civic Impact Score (CIS) for a citizen per update cycle.
+    week_start / week_end are inclusive calendar dates in Indian Standard Time (IST) for the snapshot period.
+    """
+
+    __tablename__ = "civic_impact_score_snapshots"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    week_start = Column(Date, nullable=False)
+    week_end = Column(Date, nullable=False)
+    total_score = Column(Numeric(6, 2), nullable=False)
+    breakdown = Column(JSONB, nullable=False)
+    raw_metrics = Column(JSONB, nullable=False)
+    computed_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    user = relationship("User", back_populates="cis_snapshots")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "week_start", name="uq_cis_user_week"),
+        Index("ix_cis_user_week_start_desc", "user_id", "week_start"),
+    )
 
 
 class RefreshToken(Base):
@@ -140,6 +200,7 @@ class WorkerProfile(Base):
     ward_id = Column(UUID(as_uuid=True), ForeignKey("wards.id", ondelete="SET NULL"))
     supervisor_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     rating = Column(Numeric(3, 2), default=0.00)
+    ratings_count = Column(Integer, default=0)
     tasks_completed = Column(Integer, default=0)
     tasks_active = Column(Integer, default=0)
     current_status = Column(worker_status_enum, default="offDuty")
@@ -191,6 +252,9 @@ class Grievance(Base):
     upvotes_count = Column(Integer, default=0)
     downvotes_count = Column(Integer, default=0)
     is_sensitive = Column(Boolean, default=False)
+    is_ai_spam = Column(Boolean, default=False)
+    ai_suggested_worker_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    ai_suggestion_reason = Column(Text, nullable=True)
     citizen_rating = Column(Integer, nullable=True)
     reopen_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
@@ -198,7 +262,8 @@ class Grievance(Base):
 
     category = relationship("GrievanceCategory")
     ward = relationship("Ward")
-    reporter = relationship("User")
+    reporter = relationship("User", foreign_keys=[reporter_id])
+    ai_suggested_worker = relationship("User", foreign_keys=[ai_suggested_worker_id])
     media = relationship("GrievanceMedia", back_populates="grievance", order_by="GrievanceMedia.created_at")
     votes = relationship("GrievanceVote", back_populates="grievance")
     comments = relationship("GrievanceComment", back_populates="grievance", order_by="GrievanceComment.created_at")
@@ -239,6 +304,20 @@ class GrievanceVote(Base):
 
     grievance = relationship("Grievance", back_populates="votes")
     user = relationship("User")
+
+
+class GrievanceResolutionRating(Base):
+    """One row per citizen rating event. Handles reopen: each resolution gets its own rating."""
+    __tablename__ = "grievance_resolution_ratings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    grievance_id = Column(UUID(as_uuid=True), ForeignKey("grievances.id", ondelete="CASCADE"), nullable=False)
+    worker_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    rating = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+    grievance = relationship("Grievance")
+    worker = relationship("User")
 
 
 class GrievanceComment(Base):

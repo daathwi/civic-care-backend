@@ -19,6 +19,13 @@ from app.models.models import Grievance, GrievanceComment, User, InternalMessage
 from app.core.config import settings
 from jose import jwt, JWTError
 
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from app.services.chat_service import ask_database_stream
+
+class ChatRequest(BaseModel):
+    message: str
+
 router = APIRouter()
 
 _connections: dict[str, set[WebSocket]] = defaultdict(set)
@@ -38,11 +45,16 @@ def _decode_token(token: str) -> dict | None:
 
 async def broadcast_comment(grievance_id: str, comment_data: dict):
     """Called from REST endpoint to push new comments to all WS listeners."""
+    print(f"DEBUG: Broadcasting comment for grievance {grievance_id}. Data: {comment_data}")
     dead = []
-    for ws in _connections.get(grievance_id, set()):
+    conns = _connections.get(grievance_id, set())
+    print(f"DEBUG: Found {len(conns)} active connections for grievance {grievance_id}")
+    for ws in conns:
         try:
             await ws.send_json({"type": "new_comment", "comment": comment_data})
-        except Exception:
+            print(f"DEBUG: Sent JSON to {ws.client}")
+        except Exception as e:
+            print(f"DEBUG: Failed to send to {ws.client}: {e}")
             dead.append(ws)
     for ws in dead:
         _connections[grievance_id].discard(ws)
@@ -61,12 +73,15 @@ async def broadcast_internal_message(conversation_id: str, message_data: dict):
 
 @router.websocket("/ws/grievances/{grievance_id}/comments")
 async def grievance_chat(websocket: WebSocket, grievance_id: str):
+    print(f"DEBUG: Local WS connection attempt for grievance {grievance_id}")
     await websocket.accept()
+    print(f"DEBUG: WS connection accepted for grievance {grievance_id}")
 
     user_id: str | None = None
     user_name: str = "Anonymous"
 
     _connections[grievance_id].add(websocket)
+    print(f"DEBUG: Added {websocket.client} to connections for {grievance_id}. Total: {len(_connections[grievance_id])}")
     try:
         while True:
             raw = await websocket.receive_text()
@@ -239,3 +254,17 @@ async def internal_conversation_chat(websocket: WebSocket, conversation_id: str)
         _conv_connections[conversation_id].discard(websocket)
         if not _conv_connections[conversation_id]:
             del _conv_connections[conversation_id]
+
+@router.post("/stream")
+async def stream_chat(
+    req: ChatRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Stream a response from the AI assistant, executing required database queries.
+    Expects request body: {"message": "question here"}
+    """
+    return StreamingResponse(
+        ask_database_stream(db, req.message),
+        media_type="text/event-stream"
+    )

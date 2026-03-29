@@ -7,30 +7,49 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
-  <link rel="stylesheet" href="/static/admin/css/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/amazon-fonts@1.0.1/fonts/stylesheet.css" />
+  <link rel="stylesheet" href="/static/admin/css/style.css?v=1.0.13" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
   <div class="app">
-    <aside class="sidebar">
-      <div class="sidebar-brand">CivicCare Admin</div>
+    <div class="sidebar-overlay" id="sidebar-overlay" aria-hidden="true"></div>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-icon"></span>
+        <span class="sidebar-brand-text">CivicCare Admin</span>
+        <button type="button" class="sidebar-collapse-btn" id="sidebar-collapse-btn" aria-label="Collapse sidebar" title="Collapse sidebar">‹</button>
+      </div>
       <nav class="sidebar-nav">
-        <a href="#" class="nav-item active" data-page="dashboard">Global Overview</a>
-        <a href="#" class="nav-item" data-page="map">Map View</a>
-        <a href="#" class="nav-item" data-page="analytics">Analytics</a>
-        <a href="#" class="nav-item" data-page="grievances">Grievances</a>
-        <a href="#" class="nav-item" data-page="ward-performance">Ward Performance</a>
-        <a href="#" class="nav-item" data-page="workers">Officer Management</a>
-        <a href="#" class="nav-item" data-page="logs">System Logs</a>
-        <a href="#" class="nav-item nav-item-secondary" data-page="departments">Departments</a>
-        <a href="#" class="nav-item nav-item-secondary" data-page="wards">Wards & Zones</a>
+        <div class="nav-group">
+          <div class="nav-group-label">Work</div>
+          <a href="#" class="nav-item active" data-page="command-center"><span class="nav-icon nav-icon-dashboard"></span><span class="nav-item-text">Command Center</span><span class="nav-item-tooltip">Command Center</span></a>
+          <a href="#" class="nav-item" data-page="grievances"><span class="nav-icon nav-icon-grievances"></span><span class="nav-item-text">All Grievances</span><span class="nav-item-tooltip">All Grievances</span></a>
+          <a href="#" class="nav-item" data-page="escalations"><span class="nav-icon nav-icon-escalations"></span><span class="nav-item-text">Escalations</span><span class="nav-item-tooltip">Escalations</span></a>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">Insights</div>
+          <a href="#" class="nav-item" data-page="ai-assistant"><span class="nav-icon nav-icon-ai"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><path d="M9.8 13.2h4.4M9.8 10h4.4"/></svg></span><span class="nav-item-text">AI Assistant</span><span class="nav-item-tooltip">LLM Assistant</span></a>
+          <a href="#" class="nav-item" data-page="analytics"><span class="nav-icon nav-icon-analytics"></span><span class="nav-item-text">Analytics</span><span class="nav-item-tooltip">Analytics</span></a>
+          <a href="#" class="nav-item" data-page="party-map"><span class="nav-icon nav-icon-parties"></span><span class="nav-item-text">Party Map</span><span class="nav-item-tooltip">Political party control map</span></a>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">Admin</div>
+          <a href="#" class="nav-item" data-page="workers"><span class="nav-icon nav-icon-workers"></span><span class="nav-item-text">Officers</span><span class="nav-item-tooltip">Officers</span></a>
+          <a href="#" class="nav-item" data-page="citizens"><span class="nav-icon nav-icon-citizens"></span><span class="nav-item-text">Citizens</span><span class="nav-item-tooltip">Citizens</span></a>
+          <a href="#" class="nav-item" data-page="departments"><span class="nav-icon nav-icon-dept"></span><span class="nav-item-text">Departments</span><span class="nav-item-tooltip">Departments</span></a>
+          <a href="#" class="nav-item" data-page="parties"><span class="nav-icon nav-icon-parties"></span><span class="nav-item-text">Political Parties</span><span class="nav-item-tooltip">Political Parties</span></a>
+          <a href="#" class="nav-item" data-page="wards"><span class="nav-icon nav-icon-wards"></span><span class="nav-item-text">Wards &amp; Zones</span><span class="nav-item-tooltip">Wards &amp; Zones</span></a>
+          <a href="#" class="nav-item" data-page="logs"><span class="nav-icon nav-icon-logs"></span><span class="nav-item-text">Logs</span><span class="nav-item-tooltip">Logs</span></a>
+        </div>
       </nav>
       <div class="sidebar-footer">
-        <div id="auth-area">
+        <div id="auth-area" class="sidebar-footer-content">
           <div id="login-form" class="login-form">
-            <input type="text" id="login-user-id" placeholder="User ID (e.g. b2000001-0001-4000-8000-000000000001)" title="Staff login uses User ID and password" />
+            <input type="text" id="login-user-id" placeholder="User ID or phone" title="Staff login uses User ID and password" />
             <input type="password" id="login-password" placeholder="Password" />
             <button type="button" id="btn-login">Login</button>
           </div>
@@ -43,122 +62,298 @@
     </aside>
     <main class="main">
       <header class="header">
-        <h1 id="page-title">Dashboard</h1>
+        <button type="button" class="btn-hamburger" id="btn-hamburger" aria-label="Toggle menu" aria-expanded="false">
+          <span class="hamburger-line"></span>
+          <span class="hamburger-line"></span>
+          <span class="hamburger-line"></span>
+        </button>
+        <div class="header-left">
+          <h1 id="page-title">Command Center</h1>
+          <div id="header-quick-actions" class="header-actions"></div>
+        </div>
+        <div class="header-right">
+          <div id="user-info-header" class="user-info-header hidden">
+            <span id="user-name-header"></span>
+            <button type="button" id="btn-logout-header">Logout</button>
+          </div>
+        </div>
       </header>
       <div id="content" class="content">
-        <section id="page-dashboard" class="page active">
-          <div class="cards">
-            <div class="card card-clickable" data-page="grievances">
-              <div class="card-value" id="stat-grievances">–</div>
-              <div class="card-label">Total Grievances</div>
+        <section id="page-command-center" class="page active">
+          <div class="cc-layout">
+            <div class="cc-col cc-col-map">
+              <div class="cc-map-bar">
+                <select id="cc-zone-filter"><option value="">All zones</option></select>
+                <select id="cc-ward-filter"><option value="">All wards</option></select>
+                <input type="date" id="cc-date-from" title="From" placeholder="From" />
+                <input type="date" id="cc-date-to" title="To" placeholder="To" />
+                <button type="button" id="btn-cc-refresh" class="cc-toolbar-btn cc-toolbar-btn-primary">Apply</button>
+                <label class="cc-toolbar-check"><input type="checkbox" id="cc-heatmap-toggle" checked /> Markers</label>
+                <div class="cc-map-kpis">
+                  <span class="cc-map-kpi" data-status="escalated"><strong id="cc-hud-escalated">–</strong> Escalated</span>
+                  <span class="cc-map-kpi" data-status="pending"><strong id="cc-hud-pending">–</strong> Pending</span>
+                  <span class="cc-map-kpi" data-status="assigned"><strong id="cc-hud-assigned">–</strong> Assigned</span>
+                  <span class="cc-map-kpi" data-status="inprogress"><strong id="cc-hud-inprogress">–</strong> In progress</span>
+                  <span class="cc-map-kpi" data-status="resolved"><strong id="cc-hud-resolved">–</strong> Resolved</span>
+                  <span class="cc-map-kpi cc-map-kpi-meta"><strong id="cc-hud-plotted">0</strong> on map</span>
+                </div>
+              </div>
+              <div class="cc-map-wrap">
+                <div id="map-loading" class="map-loading hidden"><span class="spinner"></span> Loading…</div>
+                <div id="command-map" class="cc-map"></div>
+                <div id="cc-ward-hover-tooltip" class="cc-ward-hover-tooltip hidden" aria-live="polite"></div>
+              </div>
             </div>
-            <div class="card card-clickable card-status-pending" data-page="grievances">
-              <div class="card-value" id="stat-pending">–</div>
-              <div class="card-label">Pending</div>
+
+            <div class="cc-col cc-col-ward" id="cc-ward-panel">
+              <div class="cc-ward-panel-header">
+                <span class="cc-ward-panel-title">Ward details</span>
+                <button type="button" class="cc-ward-close" id="cc-ward-close" aria-label="Clear selection">×</button>
+              </div>
+              <div id="ward-info-content" class="cc-ward-content"></div>
             </div>
-            <div class="card card-clickable card-status-assigned" data-page="grievances">
-              <div class="card-value" id="stat-assigned">–</div>
-              <div class="card-label">Assigned</div>
+          </div>
+        </section>
+        <section id="page-party-map" class="page">
+          <div class="cc-layout party-map-layout">
+            <div class="cc-col cc-col-map">
+              <div class="cc-map-bar">
+                <span class="cc-map-kpi cc-map-kpi-meta" style="margin-right:auto"><strong id="party-map-total-wards">0</strong> wards</span>
+                <span class="cc-map-kpi cc-map-kpi-meta"><strong id="party-map-assigned">0</strong> assigned</span>
+                <span class="cc-map-kpi cc-map-kpi-meta"><strong id="party-map-parties">0</strong> parties</span>
+                <button type="button" id="btn-party-map-refresh" class="cc-toolbar-btn cc-toolbar-btn-primary">Refresh</button>
+              </div>
+              <div class="cc-map-wrap">
+                <div id="party-map-loading" class="map-loading hidden"><span class="spinner"></span> Loading…</div>
+                <div id="party-map" class="cc-map"></div>
+                <div id="party-map-ward-tooltip" class="cc-ward-hover-tooltip hidden" aria-live="polite"></div>
+              </div>
             </div>
-            <div class="card card-clickable card-status-inprogress" data-page="grievances">
-              <div class="card-value" id="stat-inprogress">–</div>
-              <div class="card-label">In Progress</div>
+            <div class="cc-col cc-col-ward" id="party-map-panel">
+              <div class="cc-ward-panel-header">
+                <span class="cc-ward-panel-title">Party analytics</span>
+                <select id="party-map-filter" class="party-map-filter" aria-label="Sort by performance">
+                  <option value="top">Top performers</option>
+                  <option value="bottom">Bottom performers</option>
+                </select>
+              </div>
+              <div id="party-map-control-content" class="cc-ward-content">
+                <ul id="party-map-list" class="party-map-list"></ul>
+              </div>
             </div>
-            <div class="card card-clickable card-status-resolved" data-page="grievances">
-              <div class="card-value" id="stat-resolved">–</div>
-              <div class="card-label">Resolved</div>
+          </div>
+        </section>
+        <section id="page-dashboard" class="page">
+          <div class="dashboard-kpis">
+            <div class="dashboard-kpis-main">
+              <div class="dstat dstat-escalated card-clickable" data-page="escalations" title="Urgent">
+                <span class="dstat-value" id="stat-escalated">–</span>
+                <span class="dstat-label">Escalated</span>
+              </div>
+              <div class="dstat dstat-pending card-clickable" data-page="grievances" title="Awaiting action">
+                <span class="dstat-value" id="stat-pending">–</span>
+                <span class="dstat-label">Pending</span>
+              </div>
+              <div class="dstat dstat-assigned card-clickable" data-page="grievances">
+                <span class="dstat-value" id="stat-assigned">–</span>
+                <span class="dstat-label">Assigned</span>
+              </div>
+              <div class="dstat dstat-inprogress card-clickable" data-page="grievances">
+                <span class="dstat-value" id="stat-inprogress">–</span>
+                <span class="dstat-label">In Progress</span>
+              </div>
+              <div class="dstat dstat-resolved card-clickable" data-page="grievances">
+                <span class="dstat-value" id="stat-resolved">–</span>
+                <span class="dstat-label">Resolved</span>
+              </div>
+              <div class="dstat dstat-total card-clickable" data-page="grievances">
+                <span class="dstat-value" id="stat-grievances">–</span>
+                <span class="dstat-label">Total</span>
+              </div>
             </div>
-            <div class="card card-clickable" data-page="workers">
-              <div class="card-value" id="stat-workers">–</div>
-              <div class="card-label">Field Staff</div>
+            <div class="dashboard-kpis-meta">
+              <div class="dmeta-item card-clickable" id="dmeta-workers" data-page="workers">
+                <span class="dmeta-value" id="stat-workers">–</span>
+                <span class="dmeta-label">Field Staff</span>
+                <span class="dmeta-alarm" id="dmeta-workers-alarm" aria-hidden="true"></span>
+              </div>
+              <div class="dmeta-item dmeta-muted card-clickable" data-page="wards">
+                <span class="dmeta-value" id="stat-wards">–</span>
+                <span class="dmeta-label">Wards</span>
+              </div>
+              <div class="dmeta-item dmeta-muted card-clickable" data-page="departments">
+                <span class="dmeta-value" id="stat-departments">–</span>
+                <span class="dmeta-label">Departments</span>
+              </div>
             </div>
-            <div class="card card-clickable" data-page="wards">
-              <div class="card-value" id="stat-wards">–</div>
-              <div class="card-label">Wards</div>
-            </div>
-            <div class="card card-clickable" data-page="departments">
-              <div class="card-value" id="stat-departments">–</div>
-              <div class="card-label">Departments</div>
-            </div>
+          </div>
+          <div class="dashboard-nav-bar">
+            <a href="#" class="dnav-link" data-page="map">Map View</a>
+            <a href="#" class="dnav-link" data-page="escalations">Escalations</a>
+            <a href="#" class="dnav-link" data-page="grievances">All Grievances</a>
           </div>
           <div class="dashboard-bottom">
             <div class="recent-activity-panel">
               <div class="panel-header">
-                <h3 class="panel-title">Recent Grievances</h3>
-                <a href="#" class="panel-link nav-to-grievances">View all →</a>
+                <h3 class="panel-title">Escalation Priority Analytics (Top 10 EPS)</h3>
+                <a href="#" class="panel-link" id="cmd-view-all-escalations" data-page="escalations">View All Escalations →</a>
               </div>
               <div id="recent-grievances-list" class="activity-list">
                 <div class="activity-empty">Loading…</div>
               </div>
             </div>
-            <div class="breakdown-panel">
+            <div class="trend-panel">
               <div class="panel-header">
-                <h3 class="panel-title">Status Breakdown</h3>
+                <h3 class="panel-title">Escalation Trend (Last 7 Days)</h3>
               </div>
-              <div id="status-breakdown" class="breakdown-bars"></div>
+              <div class="trend-chart-wrap">
+                <canvas id="chart-escalation-trend"></canvas>
+              </div>
+              <p class="trend-hint">When escalations occurred — cluster in recent days = emergency; spread over days = staffing backlog</p>
           </div>
         </section>
-        <section id="page-map" class="page">
-          <div class="smart-filter-bar">
-            <select id="cc-zone-filter">
-              <option value="">All zones</option>
-            </select>
-            <select id="cc-ward-filter">
-              <option value="">All wards</option>
-            </select>
-            <select id="cc-status-filter">
-              <option value="">All statuses</option>
-              <option value="pending">Open (Pending)</option>
-              <option value="assigned">Assigned</option>
-              <option value="inprogress">In progress</option>
-              <option value="resolved">Closed (Resolved)</option>
-            </select>
-            <input type="date" id="cc-date-from" title="From date" />
-            <input type="date" id="cc-date-to" title="To date" />
-            <label class="toggle-chip" title="Heatmap is always shown. Toggle to also show individual markers."><input type="checkbox" id="cc-heatmap-toggle" checked /> Show Markers</label>
-            <button type="button" id="btn-cc-refresh" class="btn btn-primary flex-none">Refresh</button>
-            <button type="button" id="btn-export-csv" class="btn flex-none">CSV</button>
-            <button type="button" id="btn-export-pdf" class="btn flex-none">PDF</button>
-          </div>
-          <div id="map-stat-bar" class="map-stat-bar"></div>
-          <div class="map-layout">
-            <div class="map-panel" style="position:relative;">
-              <div id="map-loading" class="map-loading hidden"><span class="spinner"></span> Loading…</div>
-              <div id="command-map"></div>
+        <section id="page-ai-assistant" class="page">
+          <div class="ai-assistant-container">
+            <div class="ai-assistant-header">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" style="color:#0d9488"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><path d="M9.8 13.2h4.4M9.8 10h4.4"/></svg>
+              <h2>CivicCare AI Assistant <span class="ai-badge">Qwen2.5-Coder Engine</span></h2>
             </div>
-            <aside class="ward-info-panel" id="ward-info-panel">
-              <h3>Ward Info</h3>
-              <div id="ward-info-content" class="ward-info-placeholder">Click a ward polygon on the map or choose a ward in the filter.</div>
-              <div class="map-legend">
-                <div class="legend-title">Marker Legend</div>
-                <div class="legend-row"><span class="legend-dot legend-pending"></span> Pending (Open)</div>
-                <div class="legend-row"><span class="legend-dot legend-inprogress"></span> Assigned / In Progress</div>
-                <div class="legend-row"><span class="legend-dot legend-resolved"></span> Resolved</div>
-                <div class="legend-note">Heatmap intensity = complaint density</div>
+            <div class="ai-assistant-body" id="ai-chat-body">
+              <div class="ai-message ai-message-system">
+                <strong>Welcome to your AI Operations Command!</strong> <br>
+                I am your premium AI Assistant, now powered by the state-of-the-art <strong>Qwen2.5-Coder Engine</strong>. I can analyze live data across wards, citizens, and grievances with surgical precision. <br><br>
+                How can I assist your administration today?
               </div>
-            </aside>
+            </div>
+            <div class="ai-assistant-input-area">
+              <div class="ai-textarea-wrapper">
+                <textarea id="ai-chat-input" placeholder="Ask about ward performance, citizen scores, or grievance trends..." rows="1"></textarea>
+              </div>
+              <button id="ai-chat-send" aria-label="Send query" disabled>
+                <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+              </button>
+            </div>
+          </div>
+        </section>
+        <section id="page-escalations" class="page">
+          <div class="toolbar toolbar-compact">
+            <select id="escalations-filter-zone"><option value="">All zones</option></select>
+            <select id="escalations-filter-ward"><option value="">All wards</option></select>
+            <select id="escalations-filter-dept"><option value="">All departments</option></select>
+            <select id="escalations-filter-priority">
+              <option value="">All priorities</option>
+              <option value="high">High (serious)</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+            <button type="button" id="btn-refresh-escalations" class="btn btn-primary">Refresh</button>
+          </div>
+          <div class="esc-kpis">
+            <div class="esc-kpi esc-kpi-total">
+              <span class="esc-kpi-value" id="escalations-total">–</span>
+              <span class="esc-kpi-label">Total Escalated</span>
+            </div>
+            <div class="esc-kpi esc-kpi-high">
+              <span class="esc-kpi-value" id="escalations-high">–</span>
+              <span class="esc-kpi-label">High Priority</span>
+            </div>
+            <div class="esc-kpi esc-kpi-reopened">
+              <span class="esc-kpi-value" id="escalations-reopened">–</span>
+              <span class="esc-kpi-label">Reopened</span>
+            </div>
+            <div class="esc-kpi esc-kpi-oldest">
+              <span class="esc-kpi-value" id="escalations-oldest">–</span>
+              <span class="esc-kpi-label">Oldest (days)</span>
+            </div>
+          </div>
+          <div class="charts-grid charts-grid-2x2">
+            <div class="chart-card">
+              <h4>By Zone</h4>
+              <p class="chart-desc">Escalations by zone</p>
+              <div class="chart-container"><canvas id="chart-escalations-zone"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <h4>By Ward (top 10)</h4>
+              <p class="chart-desc">Escalations by ward</p>
+              <div class="chart-container"><canvas id="chart-escalations-ward"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <h4>EPS Risk Distribution</h4>
+              <p class="chart-desc">Breakdown by EPS risk levels</p>
+              <div class="chart-container"><canvas id="chart-escalations-eps-dist"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <h4>Top 5 High-Risk Wards</h4>
+              <p class="chart-desc">Wards with highest average EPS</p>
+              <div class="chart-container"><canvas id="chart-escalations-top-risk-wards"></canvas></div>
+            </div>
           </div>
           <div class="table-wrap">
             <div class="table-toolbar">
-              <input type="text" id="cc-grid-search" placeholder="Search grievance table..." />
+              <h3 class="panel-title">Escalated Grievances</h3>
             </div>
-            <table class="data-table" id="cc-grid">
+            <table class="data-table">
               <thead>
                 <tr>
-                  <th data-sort="title">Title / ID</th>
-                  <th data-sort="ward_name">Ward</th>
-                  <th data-sort="category_name">Category</th>
-                  <th data-sort="assigned_to_name">Assigned Officer</th>
-                  <th data-sort="status">Status</th>
-                  <th>View Proof</th>
+                  <th class="text-center">Rank</th>
+                  <th>Grievance</th>
+                  <th>Dept</th>
+                  <th>Ward & Zone</th>
+                  <th>Field Assistant</th>
+                  <th>Field Manager</th>
+                  <th class="text-center">EPS</th>
+                  <th>Breakdown</th>
+                  <th class="text-center">Level</th>
+                  <th class="text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody id="cc-grid-tbody"></tbody>
+              <tbody id="escalations-tbody"></tbody>
             </table>
+          </div>
+          <div id="escalations-pagination" class="pagination"></div>
+          
+          <div class="methodology-panel" style="margin-top: 30px;">
+            <div class="panel-header">
+              <h3 class="panel-title">Escalation Priority Score (EPS) Methodology</h3>
+              <div class="formula-scroll-container" style="overflow-x: auto; padding: 15px 0;">
+                <div id="eps-formula-display" style="font-size: 1.35rem; display: flex; justify-content: center; min-width: max-content;">
+                  $$EPS = (30\% \cdot \text{Age}_{norm}) + (25\% \cdot \text{Reopen}_{norm}) + (25\% \cdot \text{Votes}_{norm}) + (20\% \cdot \text{Severity})$$
+                </div>
+              </div>
+            </div>
+            <div class="formula-grid">
+              <div class="formula-card">
+                <h4>Metric Components</h4>
+                <ul class="formula-explanation-list">
+                  <li><strong>Escalation Age (30%)</strong> <span>Time elapsed since creation, normalized by ward-specific max age. Capped at 30 points.</span></li>
+                  <li><strong>Reopen Freq (25%)</strong> <span>Frequency of grievance re-openings. Score maxes at 3+ reopens (systemic issue).</span></li>
+                  <li><strong>Net Votes (25%)</strong> <span>Citizen sentiment (Upvotes - Downvotes), normalized by ward-specific max net-votes.</span></li>
+                  <li><strong>Severity (20%)</strong> <span>Categorical baseline based on priority: High (20pts), Medium (12pts), Low (6pts).</span></li>
+                </ul>
+              </div>
+              <div class="formula-card">
+                <h4>Priority Thresholds</h4>
+                <ul class="priority-threshold-list">
+                  <li><span class="eps-level-pill level-critical">Critical</span> <span>&ge; 75 — Immediate administrative intervention required.</span></li>
+                  <li><span class="eps-level-pill level-high">High</span> <span>&ge; 50 — Priority response zone.</span></li>
+                  <li><span class="eps-level-pill level-moderate">Moderate</span> <span>&ge; 25 — Standard escalation queue.</span></li>
+                  <li><span class="eps-level-pill level-low">Low</span> <span>&lt; 25 — Routine monitoring.</span></li>
+                </ul>
+              </div>
+              <div class="formula-card formula-wide">
+                <h4>Composite Calculation</h4>
+                <div class="dpi-formula-scroll" style="overflow-x: auto; padding: 10px 0;">
+                  <div class="dpi-formula" style="display: flex; justify-content: center; min-width: max-content;">
+                    $$EPS = (30\% \cdot \text{Age}_{norm}) + (25\% \cdot \text{Reopen}_{norm}) + (25\% \cdot \text{Votes}_{norm}) + (20\% \cdot \text{Severity})$$
+                  </div>
+                </div>
+                <p class="formula-note"><strong>Note on Normalization:</strong> Scores are calculated relative to the max values within each ward to ensure fair prioritization.</p>
+              </div>
+            </div>
           </div>
         </section>
         <section id="page-grievances" class="page">
-          <div class="toolbar">
+          <div class="toolbar toolbar-compact">
             <select id="filter-status">
               <option value="">All statuses</option>
               <option value="pending">Pending</option>
@@ -198,7 +393,9 @@
                   <th>Category</th>
                   <th>Ward</th>
                   <th>Assigned Officer</th>
+                  <th>Assigned Phone</th>
                   <th>Reporter</th>
+                  <th>Reporter Phone</th>
                   <th>Created</th>
                   <th>Actions</th>
                 </tr>
@@ -208,158 +405,243 @@
           </div>
           <div class="pagination" id="grievances-pagination"></div>
         </section>
-        <section id="page-ward-performance" class="page">
-          <div class="toolbar">
-            <select id="perf-zone-filter">
-              <option value="">All zones</option>
+        <section id="page-citizens" class="page">
+          <div class="toolbar toolbar-compact">
+            <select id="citizens-limit">
+              <option value="20">20 per page</option>
+              <option value="50">50 per page</option>
+              <option value="100">100 per page</option>
             </select>
-            <select id="perf-sort">
-              <option value="resolution_desc">Best resolution rate first</option>
-              <option value="resolution_asc">Lowest resolution rate first</option>
-              <option value="resolved_desc">Most resolved first</option>
-              <option value="open_desc">Most open first</option>
-              <option value="total_desc">Total grievances (high to low)</option>
-            </select>
-            <button type="button" id="btn-refresh-perf" class="btn btn-primary flex-none">Refresh</button>
+            <button type="button" id="btn-refresh-citizens" class="btn btn-primary">Refresh</button>
+            <button type="button" id="btn-update-cis" class="btn btn-secondary hidden" title="Compute weekly CIS for all citizens and save to the database">
+              Update CIS
+            </button>
           </div>
           <div class="table-wrap">
-            <table class="data-table" id="ward-perf-table">
+            <table class="data-table">
               <thead>
                 <tr>
-                  <th>Rank</th>
+                  <th>Name</th>
+                  <th>Phone</th>
+                  <th>Email</th>
                   <th>Ward</th>
                   <th>Zone</th>
-                  <th>Total</th>
-                  <th>Resolved</th>
-                  <th>Pending</th>
-                  <th>In Progress</th>
-                  <th>Resolution %</th>
+                  <th>CIS</th>
+                  <th>Joined</th>
                 </tr>
               </thead>
-              <tbody id="ward-perf-tbody"></tbody>
+              <tbody id="citizens-tbody"></tbody>
             </table>
           </div>
-          <p class="perf-note" id="ward-perf-note"></p>
+          <div class="pagination" id="citizens-pagination"></div>
         </section>
         <section id="page-departments" class="page">
+          <div class="wards-zones-search-bar">
+            <input type="text" id="dept-categories-search" placeholder="Search departments and categories…" class="wards-zones-search-input" />
+          </div>
           <div class="add-section hidden" id="add-department-section">
-            <h3 class="add-heading">Add department</h3>
+            <h3 class="add-heading" id="add-department-heading">Add department</h3>
             <form id="form-add-department" class="add-form add-form-grid">
+              <input type="hidden" name="edit_id" id="edit-id-department" value="" />
               <input type="text" name="name" placeholder="Name" required />
               <input type="text" name="short_code" placeholder="Short code" required maxlength="20" />
-              <input type="text" name="primary_color" placeholder="Color (e.g. #1976D2)" value="#1976D2" />
+              <input type="color" name="primary_color" value="#0d9488" title="Color" />
               <input type="text" name="icon" placeholder="Icon name" value="assignment" />
               <input type="text" name="manager_title" placeholder="Manager title" value="Manager" />
               <input type="text" name="assistant_title" placeholder="Assistant title" value="Assistant" />
               <input type="text" name="jurisdiction_label" placeholder="Jurisdiction" value="Ward" />
+              <input type="text" name="sdg" placeholder="SDG (e.g. SDG 6: Clean Water and Sanitation)" />
+              <textarea name="description" placeholder="Department description" rows="3"></textarea>
               <div class="add-form-actions">
-                <button type="submit" class="btn btn-primary">Add department</button>
+                <button type="submit" class="btn btn-primary" id="btn-submit-department">Add department</button>
                 <button type="button" class="btn btn-secondary btn-cancel-add" data-cancel="add-department-section">Cancel</button>
               </div>
             </form>
           </div>
           <div class="add-section hidden" id="add-category-section">
-            <h3 class="add-heading">Add grievance category</h3>
+            <h3 class="add-heading" id="add-category-heading">Add grievance category</h3>
             <form id="form-add-category" class="add-form">
+              <input type="hidden" name="edit_id" id="edit-id-category" value="" />
               <select name="dept_id" id="add-category-department" required><option value="">Select department</option></select>
               <input type="text" name="name" placeholder="Category name" required />
-              <button type="submit" class="btn btn-primary">Add category</button>
+              <button type="submit" class="btn btn-primary" id="btn-submit-category">Add category</button>
               <button type="button" class="btn btn-secondary btn-cancel-add" data-cancel="add-category-section">Cancel</button>
             </form>
           </div>
-          <button type="button" class="btn btn-add" id="btn-add-department">+ Add department</button>
-          <button type="button" class="btn btn-add" id="btn-add-category">+ Add grievance category</button>
-          <h3 class="subsection-title">Departments</h3>
-          <div class="table-wrap">
-            <table class="data-table" id="departments-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Short code</th>
-                  <th>Jurisdiction</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="departments-tbody"></tbody>
-            </table>
+          <div class="wards-zones-layout">
+            <div class="wards-zones-left">
+              <div class="wards-zones-panel-header">
+                <h3 class="wards-zones-panel-title">Departments</h3>
+                <div class="wards-zones-header-actions">
+                  <span class="header-actions-group">
+                    <button type="button" class="btn btn-action btn-edit-selected" id="btn-edit-dept-selected" disabled title="Edit selected">Edit</button>
+                    <button type="button" class="btn btn-action btn-danger-outline btn-delete-selected" id="btn-delete-dept-selected" disabled title="Delete selected">Delete</button>
+                  </span>
+                  <button type="button" class="btn btn-action btn-add" id="btn-add-department">+ Add department</button>
+                </div>
+              </div>
+              <div class="wards-zones-list" id="dept-categories-list"></div>
+            </div>
+            <div class="wards-zones-right">
+              <div class="wards-zones-panel-header">
+                <h3 class="wards-zones-panel-title">Grievance categories <span id="dept-categories-label"></span></h3>
+                <div class="wards-zones-header-actions">
+                  <span class="header-actions-group">
+                    <button type="button" class="btn btn-action btn-edit-selected" id="btn-edit-cat-selected" disabled title="Edit selected">Edit</button>
+                    <button type="button" class="btn btn-action btn-danger-outline btn-delete-selected" id="btn-delete-cat-selected" disabled title="Delete selected">Delete</button>
+                  </span>
+                  <button type="button" class="btn btn-action btn-add" id="btn-add-category">+ Add category</button>
+                </div>
+              </div>
+              <div class="table-wrap" id="dept-categories-table-wrap">
+                <div id="dept-categories-select-hint" class="wards-select-hint">Select a department to view its grievance categories</div>
+                <table class="data-table" id="dept-categories-data-table">
+                  <thead>
+                    <tr>
+                      <th class="col-checkbox"><input type="checkbox" id="dept-cat-select-all" title="Select all" aria-label="Select all" /></th>
+                      <th>Category</th>
+                    </tr>
+                  </thead>
+                  <tbody id="categories-tbody"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
-          <h3 class="subsection-title">Grievance categories</h3>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Category</th>
-                  <th>Department</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="categories-tbody"></tbody>
-            </table>
+        </section>
+        <section id="page-parties" class="page">
+          <div class="parties-dashboard">
+            <div class="parties-kpis">
+              <div class="parties-kpi card-clickable" data-page="party-map">
+                <span class="parties-kpi-value" id="parties-stat-total">–</span>
+                <span class="parties-kpi-label">Parties</span>
+              </div>
+              <div class="parties-kpi parties-kpi-wards card-clickable" data-page="party-map">
+                <span class="parties-kpi-value" id="parties-stat-wards-assigned">–</span>
+                <span class="parties-kpi-label">Wards assigned</span>
+              </div>
+              <div class="parties-kpi parties-kpi-muted card-clickable" data-page="wards">
+                <span class="parties-kpi-value" id="parties-stat-total-wards">–</span>
+                <span class="parties-kpi-label">Total wards</span>
+              </div>
+              <div class="parties-kpi parties-kpi-link card-clickable" data-page="party-map">
+                <span class="parties-kpi-label">View Party Map →</span>
+              </div>
+            </div>
+            <div class="toolbar toolbar-compact">
+              <button type="button" class="btn btn-primary" id="btn-add-party">+ Add party</button>
+            </div>
+            <div class="add-section hidden" id="add-party-section">
+              <div class="add-section-inner">
+                <h3 class="add-heading" id="add-party-heading">Add political party</h3>
+                <form id="form-add-party" class="parties-form parties-form-inline">
+                  <input type="hidden" name="edit_id" id="edit-id-party" value="" />
+                  <input type="text" name="name" placeholder="Party name" required />
+                  <input type="text" name="short_code" placeholder="Short code (e.g. BJP, AAP)" />
+                  <input type="color" name="color" value="#9ca3af" title="Color" />
+                  <button type="submit" class="btn btn-primary" id="btn-submit-party">Add party</button>
+                  <button type="button" class="btn btn-secondary btn-cancel-add" data-cancel="add-party-section">Cancel</button>
+                </form>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <div class="table-toolbar">
+                <h3 class="panel-title">Political Parties</h3>
+              </div>
+              <table class="data-table" id="parties-data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Short code</th>
+                    <th>Color</th>
+                    <th class="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="parties-tbody"></tbody>
+              </table>
+            </div>
           </div>
         </section>
         <section id="page-wards" class="page">
-          <div class="tabs">
-            <button type="button" class="tab active" data-tab="wards">Wards</button>
-            <button type="button" class="tab" data-tab="zones">Zones</button>
-          </div>
-          <div class="toolbar" id="wards-toolbar">
-            <select id="filter-ward-zone">
-              <option value="">All zones</option>
-            </select>
+          <div class="wards-zones-wards-section">
+          <div class="wards-zones-search-bar">
+            <input type="text" id="wards-zones-search" placeholder="Search zones and wards…" class="wards-zones-search-input" />
           </div>
           <div class="add-section hidden" id="add-zone-section">
-            <h3 class="add-heading">Add zone</h3>
+            <h3 class="add-heading" id="add-zone-heading">Add zone</h3>
             <form id="form-add-zone" class="add-form">
+              <input type="hidden" name="edit_id" id="edit-id-zone" value="" />
               <input type="text" name="name" placeholder="Name" required />
               <input type="text" name="code" placeholder="Code" required />
-              <button type="submit" class="btn btn-primary">Add zone</button>
+              <button type="submit" class="btn btn-primary" id="btn-submit-zone">Add zone</button>
               <button type="button" class="btn btn-secondary btn-cancel-add" data-cancel="add-zone-section">Cancel</button>
             </form>
           </div>
           <div class="add-section hidden" id="add-ward-section">
-            <h3 class="add-heading">Add ward</h3>
+            <h3 class="add-heading" id="add-ward-heading">Add ward</h3>
             <form id="form-add-ward" class="add-form">
+              <input type="hidden" name="edit_id" id="edit-id-ward" value="" />
               <select name="zone_id" id="add-ward-zone" required><option value="">Select zone</option></select>
               <input type="text" name="name" placeholder="Ward name" required />
               <input type="number" name="number" placeholder="Number" required min="1" />
-              <input type="text" name="representative_name" placeholder="Representative (optional)" />
-              <button type="submit" class="btn btn-primary">Add ward</button>
+              <input type="text" name="representative_name" placeholder="Representative name *" required />
+              <input type="text" name="representative_phone" placeholder="Representative phone * (comma-separated for multiple)" required />
+              <select name="party_id" id="add-ward-party"><option value="">No party</option></select>
+              <input type="email" name="representative_email" placeholder="Representative email" />
+              <button type="submit" class="btn btn-primary" id="btn-submit-ward">Add ward</button>
               <button type="button" class="btn btn-secondary btn-cancel-add" data-cancel="add-ward-section">Cancel</button>
             </form>
           </div>
-          <button type="button" class="btn btn-add hidden" id="btn-add-zone">+ Add zone</button>
-          <button type="button" class="btn btn-add" id="btn-add-ward">+ Add ward</button>
-          <div class="table-wrap" id="wards-table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Number</th>
-                  <th>Zone</th>
-                  <th>Representative</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="wards-tbody"></tbody>
-            </table>
+          <div class="wards-zones-layout">
+            <div class="wards-zones-left">
+              <div class="wards-zones-panel-header">
+                <h3 class="wards-zones-panel-title">Zones</h3>
+                <div class="wards-zones-header-actions">
+                  <span class="header-actions-group">
+                    <button type="button" class="btn btn-action btn-edit-selected" id="btn-edit-zone-selected" disabled title="Edit selected">Edit</button>
+                    <button type="button" class="btn btn-action btn-danger-outline btn-delete-selected" id="btn-delete-zone-selected" disabled title="Delete selected">Delete</button>
+                  </span>
+                  <button type="button" class="btn btn-action btn-add" id="btn-add-zone">+ Add zone</button>
+                </div>
+              </div>
+              <div class="wards-zones-list" id="wards-zones-list"></div>
+            </div>
+            <div class="wards-zones-right">
+              <div class="wards-zones-panel-header">
+                <h3 class="wards-zones-panel-title">Wards <span id="wards-zone-label"></span></h3>
+                <div class="wards-zones-header-actions">
+                  <span class="header-actions-group">
+                    <button type="button" class="btn btn-action btn-edit-selected" id="btn-edit-ward-selected" disabled title="Edit selected">Edit</button>
+                    <button type="button" class="btn btn-action btn-danger-outline btn-delete-selected" id="btn-delete-ward-selected" disabled title="Delete selected">Delete</button>
+                  </span>
+                  <button type="button" class="btn btn-action btn-add" id="btn-add-ward">+ Add ward</button>
+                </div>
+              </div>
+              <div class="table-wrap" id="wards-table-wrap">
+                <div id="wards-select-hint" class="wards-select-hint">Select a zone to view its wards</div>
+                <table class="data-table" id="wards-data-table">
+                  <thead>
+                    <tr>
+                      <th class="col-checkbox"><input type="checkbox" id="wards-select-all" title="Select all" aria-label="Select all" /></th>
+                      <th>Name</th>
+                      <th>Number</th>
+                      <th>Representative</th>
+                      <th>Representative Phone</th>
+                      <th>Party</th>
+                      <th>Email</th>
+                    </tr>
+                  </thead>
+                  <tbody id="wards-tbody"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
-          <div class="table-wrap hidden" id="zones-table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Code</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="zones-tbody"></tbody>
-            </table>
           </div>
         </section>
         <section id="page-workers" class="page">
+          <div class="officers-page">
           <div class="add-section hidden" id="add-worker-section">
-            <h3 class="add-heading">Add worker (user + work profile)</h3>
-            <p class="add-hint">Workers are users. Fill all user attributes (login identity and profile) and work assignment.</p>
+            <h3 class="add-heading">Add officer (user + work profile)</h3>
+            <p class="add-hint">Officers use staff logins. Fill identity, profile, and work assignment (department, zone, ward).</p>
             <form id="form-add-worker" class="add-form add-form-grid add-form-worker">
               <span class="form-section-label">User attributes (identity &amp; profile)</span>
               <label class="form-field-label">Full name *</label>
@@ -389,13 +671,13 @@
               <label class="form-field-label">Ward</label>
               <select name="ward_id" id="add-worker-ward"><option value="">Ward (optional)</option></select>
               <div class="add-form-actions">
-                <button type="submit" class="btn btn-primary">Create worker</button>
+                <button type="submit" class="btn btn-primary">Create officer</button>
                 <button type="button" class="btn btn-secondary btn-cancel-add" data-cancel="add-worker-section">Cancel</button>
               </div>
             </form>
           </div>
-          <div class="toolbar">
-            <button type="button" class="btn btn-add" id="btn-add-worker">+ Add worker</button>
+          <div class="toolbar toolbar-compact officers-toolbar">
+            <button type="button" class="btn btn-add" id="btn-add-worker">+ Add officer</button>
             <select id="filter-worker-department">
               <option value="">All departments</option>
             </select>
@@ -419,8 +701,7 @@
               <option value="100">100 per page</option>
             </select>
           </div>
-          <div class="pagination" id="workers-pagination"></div>
-          <div class="table-wrap">
+          <div class="table-wrap officers-table-wrap">
             <table class="data-table">
               <thead>
                 <tr>
@@ -438,60 +719,53 @@
               <tbody id="workers-tbody"></tbody>
             </table>
           </div>
+          <div class="pagination officers-pagination" id="workers-pagination"></div>
+          </div>
         </section>
         <section id="page-analytics" class="page">
-          <div class="analytics-tab-navbar">
-            <button type="button" class="tab active" data-tab="analytics-dept">Departments</button>
-            <button type="button" class="tab" data-tab="analytics-wards">Wards</button>
-            <button type="button" class="tab" data-tab="analytics-zones">Zones</button>
-            <button type="button" class="tab" data-tab="analytics-sustainability">Sustainability</button>
+          <div class="analytics-tab-navbar-wrap">
+            <div class="analytics-tab-navbar">
+              <button type="button" class="tab active" data-tab="analytics-dept">Departments</button>
+              <button type="button" class="tab" data-tab="analytics-workers">Officers</button>
+              <button type="button" class="tab" data-tab="analytics-wards">Wards</button>
+              <button type="button" class="tab" data-tab="analytics-zones">Zones</button>
+              <button type="button" class="tab" data-tab="analytics-citizens">Citizens</button>
+              <button type="button" class="tab" data-tab="analytics-sustainability">Sustainability</button>
+            </div>
+            <div class="analytics-header-actions">
+              <button type="button" id="btn-analytics-email-report" class="btn btn-secondary" title="Email full analytical report (PDF) to admin email">Email Reports</button>
+              <button type="button" id="btn-analytics-pdf-download" class="btn btn-secondary" title="Download full analytical report (PDF)">Download PDF report</button>
+            </div>
           </div>
           <div id="analytics-dept-content" class="tab-content active">
-            <div class="analytics-layout">
-              <aside class="leaderboard-panel">
-                <h3 class="panel-title">Department Leaderboard (by DPI)</h3>
-                <div id="dept-leaderboard" class="leaderboard-list">
-                  <div class="activity-empty">Loading analytics…</div>
-                </div>
-              </aside>
-              <div class="charts-grid">
-                <div class="chart-card">
-                  <div class="chart-card-header">
-                    <h4>Metric Composition (Radar)</h4>
-                    <select id="radar-dept-select" class="chart-dept-select" aria-label="Select department">
-                      <option value="">All (top 3)</option>
-                    </select>
-                  </div>
-                  <div style="height: 300px; position: relative;">
-                    <canvas id="chart-radar"></canvas>
-                  </div>
-                </div>
-                <div class="chart-card">
-                  <h4>Performance Distribution</h4>
-                  <div style="height: 300px; position: relative;">
-                    <canvas id="chart-dpi-dist"></canvas>
-                  </div>
-                </div>
-              </div>
+            <div class="toolbar">
+              <select id="analytics-dept-zone" aria-label="Filter by zone">
+                <option value="">All zones</option>
+              </select>
+              <select id="analytics-dept-ward" aria-label="Filter by ward">
+                <option value="">All wards</option>
+              </select>
+              <button type="button" id="btn-refresh-dept-analytics" class="btn btn-primary">Refresh</button>
             </div>
             <div class="table-wrap">
               <div class="table-toolbar">
                 <h3 class="panel-title">In-depth Metrics</h3>
+                <input type="text" id="analytics-dept-search" placeholder="Search departments…" class="analytics-table-search" />
               </div>
               <table class="data-table" id="dept-analytics-table">
                 <thead>
                   <tr>
-                    <th>Department</th>
-                    <th class="text-center">Inflow ($T$)</th>
-                    <th class="text-center">Resolutions ($R$)</th>
-                    <th class="text-center">Caseload ($P$)</th>
-                    <th class="text-center">Compliance ($S$)</th>
-                    <th class="text-center">Recurrence ($\sum Ri$)</th>
-                    <th class="text-center">Escalations ($E$)</th>
-                    <th class="text-right">Efficiency</th>
-                    <th class="text-right">Velocity</th>
-                    <th class="text-center">DPI</th>
-                    <th class="text-center">Performance Status</th>
+                    <th data-sort="name">Department</th>
+                    <th class="text-center" data-sort="total">Inflow ($T$)</th>
+                    <th class="text-center" data-sort="resolved">Resolutions ($R$)</th>
+                    <th class="text-center" data-sort="pending">Caseload ($P$)</th>
+                    <th class="text-center" data-sort="sla_resolved">Compliance ($S$)</th>
+                    <th class="text-center" data-sort="total_repeat_count">Recurrence ($\sum Ri$)</th>
+                    <th class="text-center" data-sort="escalated">Escalations ($E$)</th>
+                    <th class="text-right" data-sort="resolution_rate">Efficiency</th>
+                    <th class="text-right" data-sort="sla_rate">Velocity</th>
+                    <th class="text-center" data-sort="dpi">DPI</th>
+                    <th class="text-center" data-sort="performance">Performance Status</th>
                   </tr>
                 </thead>
                 <tbody id="dept-analytics-tbody"></tbody>
@@ -531,21 +805,291 @@
               </div>
             </div>
           </div>
+          <div id="analytics-workers-content" class="tab-content hidden">
+            <div class="toolbar">
+              <select id="analytics-worker-dept" aria-label="Filter by department">
+                <option value="">All departments</option>
+              </select>
+              <select id="analytics-worker-ward" aria-label="Filter by ward">
+                <option value="">All wards</option>
+              </select>
+              <select id="analytics-worker-period" aria-label="Period">
+                <option value="7">Last 7 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+              </select>
+              <button type="button" id="btn-refresh-worker-analytics" class="btn btn-primary">Refresh</button>
+            </div>
+            <div class="table-wrap">
+              <div class="table-toolbar">
+                <input type="text" id="analytics-worker-search" placeholder="Search officers…" class="analytics-table-search" />
+              </div>
+              <table class="data-table" id="worker-analytics-table">
+                <thead>
+                  <tr>
+                    <th data-sort="name">Officer</th>
+                    <th data-sort="phone">Phone</th>
+                    <th data-sort="department_name">Department</th>
+                    <th data-sort="ward_name">Ward</th>
+                    <th class="text-center" data-sort="period_resolved">Resolved</th>
+                    <th class="text-center" data-sort="sla_rate">SLA %</th>
+                    <th class="text-center" data-sort="rating">Rating</th>
+                    <th class="text-center" data-sort="attendance_rate">Attendance</th>
+                    <th data-sort="status">Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="worker-analytics-tbody"></tbody>
+              </table>
+            </div>
+            <div id="worker-analytics-empty" class="activity-empty hidden">Login as admin/manager to view officer analytics.</div>
+            <div class="methodology-panel">
+              <h3 class="panel-title">Worker Analytics Methodology</h3>
+              <div class="formula-grid">
+                <div class="formula-card">
+                  <h4>Worker Metrics</h4>
+                  <ul class="formula-explanation-list">
+                    <li><strong>Resolved</strong> <span>Number of grievance assignments completed by the worker within the selected period (7, 30, or 90 days).</span></li>
+                    <li><strong>SLA %</strong> <span>$\frac{S}{R} \times 100$ where $S$ = assignments completed within 48-hour SLA, $R$ = total completed. Measures timeliness.</span></li>
+                    <li><strong>Rating</strong> <span>Average citizen rating from grievance resolution feedback (GrievanceResolutionRating) in the period.</span></li>
+                    <li><strong>Attendance</strong> <span>$\frac{\text{days with clock-in}}{\text{period days}} \times 100$ — proportion of working days the worker recorded attendance.</span></li>
+                  </ul>
+                </div>
+                <div class="formula-card">
+                  <h4>Period Scope</h4>
+                  <ul class="formula-explanation-list">
+                    <li><strong>Resolution Window</strong> <span>Assignments completed between the period start and end dates are counted. Pending or in-progress tasks are excluded.</span></li>
+                    <li><strong>SLA Rule</strong> <span>Completed within 48 hours of assignment: $\text{completed\_at} - \text{assigned\_at} \leq 48\,\text{h}$.</span></li>
+                    <li><strong>Status</strong> <span>Current duty status from worker profile (e.g., onDuty, offDuty).</span></li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
           <div id="analytics-wards-content" class="tab-content hidden">
-            <div class="activity-empty">Ward level deep analysis coming soon.</div>
+            <div class="toolbar">
+              <select id="analytics-ward-zone" aria-label="Filter by zone">
+                <option value="">All zones</option>
+              </select>
+              <button type="button" id="btn-refresh-ward-analytics" class="btn btn-primary">Refresh</button>
+            </div>
+            <div class="table-wrap">
+              <div class="table-toolbar">
+                <input type="text" id="analytics-ward-search" placeholder="Search wards…" class="analytics-table-search" />
+              </div>
+              <table class="data-table" id="ward-analytics-table">
+                <thead>
+                  <tr>
+                    <th data-sort="name">Ward</th>
+                    <th data-sort="zone_name">Zone</th>
+                    <th data-sort="rep_name">Representative Name</th>
+                    <th data-sort="rep_phone">Representative Phone</th>
+                    <th data-sort="party_short_code">Representative Party</th>
+                    <th class="text-center" data-sort="total">Total</th>
+                    <th class="text-center" data-sort="resolved">Resolved</th>
+                    <th class="text-center" data-sort="pending">Pending</th>
+                    <th class="text-center" data-sort="sla_resolved">SLA</th>
+                    <th class="text-center" data-sort="escalated">Escalated</th>
+                    <th class="text-right" data-sort="resolution_rate">Resolution %</th>
+                    <th class="text-center" data-sort="wpi">WPI</th>
+                    <th class="text-center" data-sort="performance">Performance</th>
+                  </tr>
+                </thead>
+                <tbody id="ward-analytics-tbody"></tbody>
+              </table>
+            </div>
+            <div class="methodology-panel">
+              <h3 class="panel-title">Ward Analytics Methodology</h3>
+              <div class="formula-grid">
+                <div class="formula-card">
+                  <h4>Ward Metrics</h4>
+                  <ul class="formula-explanation-list">
+                    <li><strong>Total</strong> <span>All grievances in the ward (includes pending, resolved, escalated).</span></li>
+                    <li><strong>Resolved</strong> <span>Grievances closed with status <em>resolved</em>.</span></li>
+                    <li><strong>Pending</strong> <span>Grievances not yet resolved (pending, assigned, in progress).</span></li>
+                    <li><strong>SLA</strong> <span>Resolutions completed within 48 hours of creation: $\text{updated\_at} - \text{created\_at} \leq 48\,\text{h}$.</span></li>
+                    <li><strong>Escalated</strong> <span>Grievances escalated to higher administrative levels.</span></li>
+                    <li><strong>Resolution %</strong> <span>$\frac{R}{T} \times 100$ — proportion of total grievances that have been resolved.</span></li>
+                  </ul>
+                </div>
+                <div class="formula-card formula-wide">
+                  <h4>Ward Performance Index (WPI)</h4>
+                  <div class="dpi-formula">
+                    $WPI = \frac{\sum \text{Department DPI}}{\text{Number of Departments active in ward}}$
+                  </div>
+                  <p class="formula-note">Each department's DPI is computed per (ward, department) using the same framework as the Departments tab. WPI is the average of those department scores for the ward. Wards with no department activity default to <strong>70.0</strong>.</p>
+                </div>
+              </div>
+            </div>
           </div>
           <div id="analytics-zones-content" class="tab-content hidden">
-            <div class="activity-empty">Zone level comparative analytics coming soon.</div>
+            <div class="toolbar">
+              <button type="button" id="btn-refresh-zone-analytics" class="btn btn-primary">Refresh</button>
+            </div>
+            <div class="table-wrap">
+              <div class="table-toolbar">
+                <input type="text" id="analytics-zone-search" placeholder="Search zones…" class="analytics-table-search" />
+              </div>
+              <table class="data-table" id="zone-analytics-table">
+                <thead>
+                  <tr>
+                    <th data-sort="name">Zone</th>
+                    <th class="text-center" data-sort="total">Total</th>
+                    <th class="text-center" data-sort="resolved">Resolved</th>
+                    <th class="text-center" data-sort="pending">Pending</th>
+                    <th class="text-center" data-sort="sla_resolved">SLA</th>
+                    <th class="text-right" data-sort="resolution_rate">Resolution %</th>
+                    <th class="text-center" data-sort="zpi">ZPI</th>
+                    <th class="text-center" data-sort="performance">Performance</th>
+                  </tr>
+                </thead>
+                <tbody id="zone-analytics-tbody"></tbody>
+              </table>
+            </div>
+            <div class="methodology-panel">
+              <h3 class="panel-title">Zone Analytics Methodology</h3>
+              <div class="formula-grid">
+                <div class="formula-card">
+                  <h4>Zone Metrics</h4>
+                  <ul class="formula-explanation-list">
+                    <li><strong>Total</strong> <span>All grievances across all wards in the zone.</span></li>
+                    <li><strong>Resolved</strong> <span>Grievances closed with status <em>resolved</em>.</span></li>
+                    <li><strong>Pending</strong> <span>Grievances not yet resolved.</span></li>
+                    <li><strong>SLA</strong> <span>Resolutions completed within 48 hours of creation.</span></li>
+                    <li><strong>Resolution %</strong> <span>$\frac{R}{T} \times 100$ — proportion of total grievances resolved in the zone.</span></li>
+                  </ul>
+                </div>
+                <div class="formula-card formula-wide">
+                  <h4>Zone Performance Index (ZPI)</h4>
+                  <div class="dpi-formula">
+                    $ZPI = \frac{\sum \text{Ward WPI}}{\text{Number of Wards in zone}}$
+                  </div>
+                  <p class="formula-note">ZPI is the average of Ward Performance Index (WPI) for all wards in the zone. Each ward's WPI is derived from department-level DPIs as defined in the Ward analytics methodology. Zones with no ward activity default to <strong>70.0</strong>.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="analytics-citizens-content" class="tab-content hidden citizens-cis-pane">
+            <div class="citizens-cis-actions">
+              <button type="button" id="btn-refresh-citizen-cis" class="btn btn-primary">Refresh</button>
+            </div>
+            <p id="citizen-cis-week-note" class="citizens-cis-callout" hidden></p>
+            <div class="citizens-cis-split">
+              <div class="table-wrap citizens-cis-leaderboard">
+                <div class="citizens-cis-panel-head">
+                  <h3 class="citizens-cis-panel-title">Top 10 — Civic Impact Score</h3>
+                </div>
+                <div class="citizens-cis-table-scroll">
+                  <table class="data-table citizens-cis-table" id="citizen-cis-top-table">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Name</th>
+                        <th>Phone</th>
+                        <th>Ward</th>
+                        <th>Zone</th>
+                        <th class="text-right">CIS</th>
+                      </tr>
+                    </thead>
+                    <tbody id="citizen-cis-top-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="table-wrap citizens-cis-leaderboard">
+                <div class="citizens-cis-panel-head">
+                  <h3 class="citizens-cis-panel-title">Bottom 5 — Civic Impact Score</h3>
+                </div>
+                <div class="citizens-cis-table-scroll">
+                  <table class="data-table citizens-cis-table" id="citizen-cis-bottom-table">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Name</th>
+                        <th>Phone</th>
+                        <th>Ward</th>
+                        <th>Zone</th>
+                        <th class="text-right">CIS</th>
+                      </tr>
+                    </thead>
+                    <tbody id="citizen-cis-bottom-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div class="methodology-panel citizens-cis-methodology">
+              <h3 class="panel-title">Civic Impact Score (CIS)</h3>
+              <div class="formula-grid">
+                <div class="formula-card formula-wide">
+                  <p class="formula-note">
+                    CIS (0–100) measures verified citizen participation: grievances filed, votes cast, comments, ward-level activity, and quality (e.g. non-spam) signals.
+                    Values use the <strong>latest stored snapshot</strong> per citizen (period dates are <strong>Indian Standard Time</strong>), from a rolling window of up to 7 days since the last global CIS run — same source as the Citizens list in Admin.
+                    Use <strong>Update CIS</strong> on the Citizens page to run now; the next automatic run is scheduled <strong>one week later (IST)</strong>.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
           <div id="analytics-sustainability-content" class="tab-content hidden">
-            <div class="activity-empty">Sustainability & Long-term impact metrics coming soon.</div>
+            <div class="toolbar">
+              <select id="analytics-sustainability-zone" aria-label="Filter by zone">
+                <option value="">All zones</option>
+              </select>
+              <select id="analytics-sustainability-ward" aria-label="Filter by ward">
+                <option value="">All wards</option>
+              </select>
+              <button type="button" id="btn-refresh-sustainability-analytics" class="btn btn-primary">Refresh</button>
+            </div>
+            <div class="dashboard-stats sustainability-stats">
+              <div class="dstat"><span class="dstat-label">Departments</span><span class="dstat-value" id="sustainability-stat-departments">–</span></div>
+              <div class="dstat"><span class="dstat-label">SDG mapped</span><span class="dstat-value" id="sustainability-stat-mapped">–</span></div>
+              <div class="dstat"><span class="dstat-label">Unmapped</span><span class="dstat-value" id="sustainability-stat-unmapped">–</span></div>
+              <div class="dstat"><span class="dstat-label">SDG groups</span><span class="dstat-value" id="sustainability-stat-sdg-groups">–</span></div>
+              <div class="dstat"><span class="dstat-label">Avg Sustainability Index</span><span class="dstat-value" id="sustainability-stat-avg-si">–</span></div>
+            </div>
+            <div class="table-wrap">
+              <div class="table-toolbar">
+                <h3 class="panel-title">SDG-wise Sustainability Mapping</h3>
+                <input type="text" id="analytics-sustainability-search" placeholder="Search SDG or mapped departments…" class="analytics-table-search" />
+              </div>
+              <table class="data-table" id="sustainability-analytics-table">
+                <thead>
+                  <tr>
+                    <th data-sort="sdg">SDG</th>
+                    <th data-sort="description">Description</th>
+                    <th data-sort="mapped_departments_text">Mapped departments</th>
+                    <th class="text-center" data-sort="department_count">Department count</th>
+                    <th class="text-center" data-sort="sustainability_index">Sustainability Index</th>
+                    <th class="text-center" data-sort="max_sustainability_index">Max Sustainability Index</th>
+                  </tr>
+                </thead>
+                <tbody id="sustainability-analytics-tbody"></tbody>
+              </table>
+            </div>
+            <div class="methodology-panel">
+              <h3 class="panel-title">Sustainability Methodology</h3>
+              <div class="formula-grid">
+                <div class="formula-card formula-wide">
+                  <h4>Sustainability Index (SI)</h4>
+                  <div class="dpi-formula">
+                    $SI_{SDG} = \frac{\sum \text{DPI of mapped departments}}{\text{No. of mapped departments}}$
+                  </div>
+                  <p class="formula-note">For each SDG, departments are mapped from the comma-separated SDG field. Sustainability Index is the average DPI of mapped departments for that SDG. Add or edit SDG/description in Departments to keep this analysis accurate.</p>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
         <section id="page-logs" class="page">
           <div class="toolbar">
+            <select id="logs-ward-filter">
+              <option value="">All wards</option>
+            </select>
+            <select id="logs-actor-filter">
+              <option value="">All actors</option>
+            </select>
+            <label class="logs-date-label"><span>From</span><input type="date" id="logs-date-from" /></label>
+            <label class="logs-date-label"><span>To</span><input type="date" id="logs-date-to" /></label>
             <input type="text" id="logs-search" placeholder="Search grievance title…" />
-            <input type="date" id="logs-date-from" />
-            <input type="date" id="logs-date-to" />
             <select id="logs-geo-filter">
               <option value="">All events</option>
               <option value="bad">Geofence violations only</option>
@@ -561,6 +1105,7 @@
                   <th>Grievance</th>
                   <th>Ward</th>
                   <th>Event</th>
+                  <th>Actor</th>
                   <th>Geofence</th>
                 </tr>
               </thead>
@@ -585,6 +1130,7 @@
           <option value="assigned">Assigned</option>
           <option value="inprogress">In progress</option>
           <option value="resolved">Resolved</option>
+          <option value="escalated">Escalated</option>
         </select>
         <label for="modal-priority-select">Priority</label>
         <select id="modal-priority-select">
@@ -603,11 +1149,11 @@
   <div id="modal-assign-worker" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-box">
-      <h3>Assign worker</h3>
+      <h3>Assign officer</h3>
       <div class="modal-body">
         <input type="hidden" id="modal-assign-grievance-id" />
-        <label for="modal-assign-worker-select">Worker</label>
-        <select id="modal-assign-worker-select"><option value="">Select worker</option></select>
+        <label for="modal-assign-worker-select">Officer</label>
+        <select id="modal-assign-worker-select"><option value="">Select officer</option></select>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn btn-secondary modal-close-assign">Cancel</button>
@@ -616,94 +1162,10 @@
     </div>
   </div>
 
-  <div id="modal-edit-zone" class="modal hidden">
-    <div class="modal-backdrop"></div>
-    <div class="modal-box">
-      <h3>Edit zone</h3>
-      <div class="modal-body">
-        <input type="hidden" id="edit-zone-id" />
-        <label for="edit-zone-name">Name</label>
-        <input type="text" id="edit-zone-name" placeholder="Name" />
-        <label for="edit-zone-code">Code</label>
-        <input type="text" id="edit-zone-code" placeholder="Code" />
-      </div>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-secondary modal-close-edit" data-modal="modal-edit-zone">Cancel</button>
-        <button type="button" class="btn btn-primary" id="btn-save-zone">Save</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="modal-edit-ward" class="modal hidden">
-    <div class="modal-backdrop"></div>
-    <div class="modal-box">
-      <h3>Edit ward</h3>
-      <div class="modal-body">
-        <input type="hidden" id="edit-ward-id" />
-        <label for="edit-ward-zone">Zone</label>
-        <select id="edit-ward-zone"><option value="">Zone</option></select>
-        <label for="edit-ward-name">Name</label>
-        <input type="text" id="edit-ward-name" placeholder="Name" />
-        <label for="edit-ward-number">Number</label>
-        <input type="number" id="edit-ward-number" placeholder="Number" min="1" />
-        <label for="edit-ward-rep">Representative (optional)</label>
-        <input type="text" id="edit-ward-rep" placeholder="Representative" />
-      </div>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-secondary modal-close-edit" data-modal="modal-edit-ward">Cancel</button>
-        <button type="button" class="btn btn-primary" id="btn-save-ward">Save</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="modal-edit-department" class="modal hidden">
-    <div class="modal-backdrop"></div>
-    <div class="modal-box modal-box-wide">
-      <h3>Edit department</h3>
-      <div class="modal-body">
-        <input type="hidden" id="edit-dept-id" />
-        <label for="edit-dept-name">Name</label>
-        <input type="text" id="edit-dept-name" placeholder="Name" />
-        <label for="edit-dept-short-code">Short code</label>
-        <input type="text" id="edit-dept-short-code" placeholder="Short code" />
-        <label for="edit-dept-color">Color</label>
-        <input type="text" id="edit-dept-color" placeholder="Color" />
-        <label for="edit-dept-icon">Icon</label>
-        <input type="text" id="edit-dept-icon" placeholder="Icon" />
-        <label for="edit-dept-manager-title">Manager title</label>
-        <input type="text" id="edit-dept-manager-title" placeholder="Manager title" />
-        <label for="edit-dept-assistant-title">Assistant title</label>
-        <input type="text" id="edit-dept-assistant-title" placeholder="Assistant title" />
-        <label for="edit-dept-jurisdiction">Jurisdiction</label>
-        <input type="text" id="edit-dept-jurisdiction" placeholder="Jurisdiction" />
-      </div>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-secondary modal-close-edit" data-modal="modal-edit-department">Cancel</button>
-        <button type="button" class="btn btn-primary" id="btn-save-department">Save</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="modal-edit-category" class="modal hidden">
-    <div class="modal-backdrop"></div>
-    <div class="modal-box">
-      <h3>Edit category</h3>
-      <div class="modal-body">
-        <input type="hidden" id="edit-cat-id" />
-        <label for="edit-cat-name">Name</label>
-        <input type="text" id="edit-cat-name" placeholder="Name" />
-      </div>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-secondary modal-close-edit" data-modal="modal-edit-category">Cancel</button>
-        <button type="button" class="btn btn-primary" id="btn-save-category">Save</button>
-      </div>
-    </div>
-  </div>
-
   <div id="modal-edit-worker" class="modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-box modal-box-wide">
-      <h3>Edit worker (user + work profile)</h3>
+      <h3>Edit officer (user + work profile)</h3>
       <input type="hidden" id="edit-worker-id" />
       <div class="modal-body modal-form-grid">
         <span class="form-section-label">User attributes</span>
@@ -739,11 +1201,87 @@
     </div>
   </div>
 
+  <div id="modal-worker-analytics" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box modal-box-wide modal-worker-detail">
+      <div id="modal-worker-analytics-body" class="modal-body modal-worker-detail-body">
+        <div class="activity-empty">Loading…</div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary modal-close" data-modal="modal-worker-analytics">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-grievance-detail" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box modal-box-wide grievance-detail-modal">
+      <div class="modal-header">
+        <h3>Grievance Details</h3>
+        <span class="grievance-id-tag" id="det-grievance-id">#ID</span>
+      </div>
+      <div class="modal-body">
+        <div class="det-main-grid">
+          <div class="det-sidebar">
+            <div class="det-section">
+              <label>Status &amp; Priority</label>
+              <div class="det-val-group">
+                <span id="det-status-pill" class="status-pill">Pending</span>
+                <span id="det-priority-pill" class="priority-pill">Medium</span>
+              </div>
+            </div>
+            <div id="det-eps-section" class="det-section hidden">
+              <label>Escalation Priority Score (EPS)</label>
+              <div class="det-eps-score-wrap">
+                <div id="det-eps-total" class="eps-score-text">0</div>
+                <div id="det-eps-level" class="eps-level-pill">Low</div>
+              </div>
+              <div id="det-eps-breakdown" class="det-eps-breakdown-mini"></div>
+            </div>
+            <div class="det-section">
+              <label>Location &amp; Category</label>
+              <div class="det-meta-item"><strong>Ward:</strong> <span id="det-ward">...</span></div>
+              <div class="det-meta-item"><strong>Category:</strong> <span id="det-category">...</span></div>
+              <div class="det-meta-item"><strong>Dept:</strong> <span id="det-dept">...</span></div>
+              <div class="det-meta-item"><strong>Created:</strong> <span id="det-created">...</span></div>
+            </div>
+          </div>
+          <div class="det-content">
+            <div class="det-section">
+              <label>Title</label>
+              <h2 id="det-title">Grievance Title</h2>
+            </div>
+            <div class="det-section">
+              <label>Description</label>
+              <div id="det-description" class="det-description-text">No description provided.</div>
+            </div>
+            <div class="det-section" id="det-media-section">
+              <label>Attachments</label>
+              <div id="det-media-gallery" class="det-media-gallery">
+                <div class="activity-empty">No media.</div>
+              </div>
+            </div>
+            <div class="det-section">
+              <label>Internal Comments / Audit Trail</label>
+              <div id="det-comments" class="det-comments-list">
+                <div class="activity-empty">No comments yet.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary modal-close" data-modal="modal-grievance-detail">Close</button>
+        <button type="button" class="btn btn-primary btn-update-status-from-det">Update Status</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="/static/admin/js/app.js?v=1.0.1"></script>
+  <script defer src="/static/admin/js/app.js?v=1.0.17"></script>
 </body>
 </html>

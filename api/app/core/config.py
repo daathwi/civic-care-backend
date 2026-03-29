@@ -18,9 +18,20 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/civiccare"
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = True
+    SMTP_FROM_EMAIL: str = ""
+    ANALYTICS_REPORT_ADMIN_EMAIL: str = ""
 
     # Path to Delhi wards GeoPackage for ward-from-location lookup (empty = disabled)
     DELHI_WARDS_GPKG_PATH: str = ""
+
+    # AI Infrastructure (Ollama)
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama3.2:3b"
 
     @property
     def delhi_wards_gpkg_path(self) -> Path | None:
@@ -31,6 +42,9 @@ class Settings(BaseSettings):
             return DEFAULT_GPKG
         return None
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+    model_config = SettingsConfigDict(
+        env_file=(str(BASE_DIR / "api" / ".env"), ".env"),
+        case_sensitive=True,
+    )
 
 settings = Settings()

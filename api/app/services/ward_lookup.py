@@ -1,7 +1,8 @@
 from typing import Any
 
-from shapely.geometry import shape
+from shapely.geometry import Point, shape
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Ward
@@ -17,7 +18,9 @@ async def _get_ward_geometries(db: AsyncSession) -> list[tuple[Ward, Any]]:
         return _WARD_GEOMETRY_CACHE
 
     result = await db.execute(
-        select(Ward).where(Ward.polygon_geojson.isnot(None))
+        select(Ward)
+        .options(selectinload(Ward.party))
+        .where(Ward.polygon_geojson.isnot(None))
     )
     wards = result.scalars().all()
     
@@ -47,8 +50,6 @@ async def lookup_ward_by_coords(
     db: AsyncSession, lat: float, lng: float,
 ) -> Ward | None:
     """Point-in-polygon lookup using in-memory Shapely cache."""
-    from shapely.geometry import Point
-    
     wards_with_geoms = await _get_ward_geometries(db)
     point = Point(lng, lat)
 
@@ -57,3 +58,39 @@ async def lookup_ward_by_coords(
             return ward
 
     return None
+
+
+# ~35–40 m at Delhi lat; expands ward polygon slightly so GPS drift at edges still counts as inside.
+WARD_ATTENDANCE_BUFFER_DEG = 0.00035
+
+
+async def lookup_ward_for_attendance(
+    db: AsyncSession,
+    lat: float,
+    lng: float,
+) -> Ward | None:
+    """
+    Resolve which Delhi ward contains this GPS point for attendance.
+
+    Uses a small buffer around ward polygons so clock-in/out near boundaries is not rejected
+    due to typical GPS error. Falls back to strict contains if buffering fails.
+    """
+    wards_with_geoms = await _get_ward_geometries(db)
+    point = Point(lng, lat)
+
+    for ward, geom in wards_with_geoms:
+        try:
+            inflated = geom.buffer(WARD_ATTENDANCE_BUFFER_DEG)
+            if inflated.covers(point):
+                return ward
+        except Exception:
+            if geom.covers(point):
+                return ward
+
+    return None
+
+
+def invalidate_ward_geometry_cache() -> None:
+    """Clear cached ward polygons (e.g. after bulk ward import)."""
+    global _WARD_GEOMETRY_CACHE
+    _WARD_GEOMETRY_CACHE = None

@@ -34,6 +34,7 @@ def _to_worker_out(user: User) -> WorkerOut:
         ward_id=wp.ward_id if wp else None,
         last_active_ward=wp.ward.name if wp and wp.ward else None,
         rating=float(wp.rating) if wp and wp.rating else None,
+        ratings_count=wp.ratings_count if wp else 0,
         tasks_completed=wp.tasks_completed if wp else 0,
         tasks_active=wp.tasks_active if wp else 0,
         status=wp.current_status if wp else None,
@@ -45,8 +46,9 @@ def _to_worker_out(user: User) -> WorkerOut:
 @router.get(
     "",
     response_model=WorkerListResponse,
-    summary="List field assistants",
-    description="Paginated list of field assistants (fieldManager and fieldAssistant). Optional filters: department, ward_id, status. **Access:** public (no auth).",
+    summary="List helpful field assistants",
+    description="Look through the list of field assistants and managers who are working to keep the city clean.",
+    operation_id="listStaffMembers",
     response_description="List of field assistants and total count.",
 )
 async def list_workers(
@@ -54,6 +56,7 @@ async def list_workers(
     department: uuid.UUID | None = Query(None, description="Filter by department UUID."),
     ward_id: uuid.UUID | None = Query(None, description="Filter by ward UUID."),
     status_filter: str | None = Query(None, alias="status", description="Filter by status: onDuty, offDuty."),
+    sort_by: str | None = Query(None, description="Sort by: rating (best first), tasks_completed, or name."),
     skip: int = Query(0, ge=0, description="Number of items to skip (offset)."),
     limit: int = Query(50, ge=1, le=100, description="Page size."),
 ):
@@ -82,6 +85,13 @@ async def list_workers(
         query = query.where(WorkerProfile.current_status == status_filter)
         count_q = count_q.where(WorkerProfile.current_status == status_filter)
 
+    if sort_by == "rating":
+        query = query.order_by(WorkerProfile.rating.desc().nullslast(), WorkerProfile.ratings_count.desc())
+    elif sort_by == "tasks_completed":
+        query = query.order_by(WorkerProfile.tasks_completed.desc())
+    elif sort_by == "name":
+        query = query.order_by(User.name.asc())
+
     total = (await db.execute(count_q)).scalar() or 0
     result = await db.execute(query.offset(skip).limit(limit))
     workers = result.scalars().unique().all()
@@ -95,8 +105,9 @@ async def list_workers(
 @router.get(
     "/{worker_id}",
     response_model=WorkerOut,
-    summary="Get field assistant by ID",
-    description="Return a single field assistant by UUID. **Access:** public (no auth).",
+    summary="View staff member details",
+    description="See the profile and contact information for a specific staff member.",
+    operation_id="fetchStaffDetails",
     response_description="Field assistant detail.",
 )
 async def get_worker(
@@ -121,8 +132,9 @@ async def get_worker(
     "",
     response_model=WorkerOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Create field assistant",
-    description="Create a new field assistant (user with role fieldAssistant or fieldManager). **Access:** fieldManager or admin only (Bearer required).",
+    summary="Add a new staff member",
+    description="Register a new field assistant or manager in the system.",
+    operation_id="registerStaffMember",
     response_description="Created field assistant.",
 )
 async def create_worker(
@@ -173,8 +185,9 @@ async def create_worker(
 @router.patch(
     "/{worker_id}",
     response_model=WorkerOut,
-    summary="Update field assistant",
-    description="Update a field assistant. **Access:** fieldManager or admin only.",
+    summary="Update staff information",
+    description="Change details for an existing staff member, like their role or contact info.",
+    operation_id="updateStaffProfile",
 )
 async def update_worker(
     worker_id: uuid.UUID,
@@ -235,8 +248,9 @@ async def update_worker(
 @router.delete(
     "/{worker_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete field assistant",
-    description="Delete a field assistant (user and profile). **Access:** fieldManager or admin only.",
+    summary="Remove a staff member",
+    description="Deactivate and remove a staff member's account from the system.",
+    operation_id="deactivateStaffAccount",
 )
 async def delete_worker(
     worker_id: uuid.UUID,

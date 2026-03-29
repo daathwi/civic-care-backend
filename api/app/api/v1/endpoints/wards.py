@@ -13,12 +13,15 @@ from shapely.geometry import shape
 
 from app.api.deps import require_manager
 from app.db.database import get_db
-from app.models.models import Department, GrievanceCategory, User, Ward, WorkerProfile, Zone
+from app.models.models import Department, GrievanceCategory, PoliticalParty, User, Ward, WorkerProfile, Zone
 from app.schemas.ward import (
     CategoryListOut,
     DepartmentCategoryOut,
     GrievanceCategoryCreate,
     GrievanceCategoryUpdate,
+    PoliticalPartyCreate,
+    PoliticalPartyOut,
+    PoliticalPartyUpdate,
     WardCreate,
     WardLookupResult,
     WardOut,
@@ -63,6 +66,7 @@ def _get_ward_out(w: Ward, zone_name: str | None = None) -> WardOut:
         except Exception as e:
             print(f"Error calculating geometry for ward {w.number}: {e}")
 
+    party_name = w.party.name if w.party else w.representative_party
     return WardOut(
         id=w.id,
         name=w.name,
@@ -71,6 +75,9 @@ def _get_ward_out(w: Ward, zone_name: str | None = None) -> WardOut:
         zone_name=zone_name or (w.zone.name if w.zone else None),
         representative_name=w.representative_name,
         representative_phone=w.representative_phone or [],
+        party_id=w.party_id,
+        representative_party=party_name,
+        representative_email=w.representative_email,
         centroid_lat=centroid_lat,
         centroid_lng=centroid_lng,
         min_lat=min_lat,
@@ -87,8 +94,9 @@ def _get_ward_out(w: Ward, zone_name: str | None = None) -> WardOut:
 @router.get(
     "/zones",
     response_model=list[ZoneOut],
-    summary="List zones",
-    description="List all zones. **Access:** public (no auth).",
+    summary="Browse administrative zones",
+    description="See the different zones of the city used for managing departments.",
+    operation_id="listAdministrativeZones",
     response_description="List of zones.",
 )
 async def list_zones(db: AsyncSession = Depends(get_db)):
@@ -99,8 +107,9 @@ async def list_zones(db: AsyncSession = Depends(get_db)):
 @router.get(
     "/zones/{zone_id}",
     response_model=ZoneOut,
-    summary="Get zone by ID",
-    description="Return a single zone. **Access:** public (no auth).",
+    summary="View zone details",
+    description="See the name and code for a specific administrative zone.",
+    operation_id="getZoneDetails",
 )
 async def get_zone(zone_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     zone = (await db.execute(select(Zone).where(Zone.id == zone_id))).scalar_one_or_none()
@@ -112,8 +121,9 @@ async def get_zone(zone_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 @router.patch(
     "/zones/{zone_id}",
     response_model=ZoneOut,
-    summary="Update zone",
-    description="Update a zone. **Access:** fieldManager or admin only.",
+    summary="Update zone details",
+    description="Change the name or code for an existing administrative zone.",
+    operation_id="updateZoneDetails",
 )
 async def update_zone(
     zone_id: uuid.UUID,
@@ -139,8 +149,9 @@ async def update_zone(
 @router.delete(
     "/zones/{zone_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete zone",
-    description="Delete a zone. Fails if it has wards. **Access:** fieldManager or admin only.",
+    summary="Remove a zone",
+    description="Delete an administrative zone from the system. It must not have any wards in it.",
+    operation_id="deleteAdministrativeZone",
 )
 async def delete_zone(
     zone_id: uuid.UUID,
@@ -161,8 +172,9 @@ async def delete_zone(
     "/zones",
     response_model=ZoneOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Create zone",
-    description="Create a new zone. **Access:** fieldManager or admin only (Bearer required).",
+    summary="Add a new zone",
+    description="Create a new administrative zone in the city management system.",
+    operation_id="createNewAdministrativeZone",
     response_description="Created zone.",
 )
 async def create_zone(
@@ -187,15 +199,16 @@ async def create_zone(
 @router.get(
     "/wards",
     response_model=list[WardOut],
-    summary="List wards",
-    description="List all wards. Optional filter: zone_id. **Access:** public (no auth).",
+    summary="Browse city wards",
+    description="Look through the different wards in the city to find which one you are in.",
+    operation_id="listCityWardsOverview",
     response_description="List of wards.",
 )
 async def list_wards(
     db: AsyncSession = Depends(get_db),
     zone_id: uuid.UUID | None = Query(None, description="Filter by zone UUID."),
 ):
-    query = select(Ward).options(selectinload(Ward.zone))
+    query = select(Ward).options(selectinload(Ward.zone), selectinload(Ward.party))
     if zone_id:
         query = query.where(Ward.zone_id == zone_id)
     query = query.order_by(Ward.number)
@@ -207,8 +220,9 @@ async def list_wards(
 @router.get(
     "/wards/lookup",
     response_model=WardLookupResult,
-    summary="Lookup ward by coordinates",
-    description="Return the ward that contains the given lat/lng (point-in-polygon). **Access:** public (no auth).",
+    summary="Find your ward automatically",
+    description="Use your GPS location to find out which ward and zone you are currently in.",
+    operation_id="lookupWardByCoordinates",
     response_description="Ward if found, else found=false.",
 )
 async def lookup_ward(
@@ -229,46 +243,98 @@ async def lookup_ward(
     return WardLookupResult(found=False)
 
 
-@router.get(
-    "/wards/geojson",
-    summary="Delhi ward boundaries GeoJSON",
-    description="Return Delhi wards boundary polygons as GeoJSON for admin map rendering. **Access:** public (no auth).",
-)
-async def wards_geojson():
+def _load_ward_geojson() -> dict:
+    """Load ward boundaries from GPKG or GeoJSON file. Returns GeoJSON FeatureCollection."""
     global _GEOJSON_CACHE
     if _GEOJSON_CACHE is not None:
-        return JSONResponse(
-            content=_GEOJSON_CACHE,
-            headers={"Cache-Control": "public, max-age=86400"},
-        )
+        return _GEOJSON_CACHE
 
     current = Path(__file__).resolve()
-    candidates = [
+    # civic-care-backend/data/delhi_wards.gpkg (parents[5] = civic-care-backend when run from api/)
+    gpkg_path = current.parents[5] / "data" / "delhi_wards.gpkg"
+    geojson_candidates = [
         current.parents[7] / "backend_tests" / "delhi_wards.geojson",
         current.parents[6] / "backend_tests" / "delhi_wards.geojson",
+        current.parents[5] / "data" / "delhi_wards.geojson",
     ]
-    for fp in candidates:
+
+    # 1. Try GPKG first (primary source)
+    if gpkg_path.is_file():
+        try:
+            import geopandas as gpd
+
+            gdf = gpd.read_file(gpkg_path)
+            if gdf.crs and gdf.crs.to_epsg() != 4326:
+                gdf = gdf.to_crs(epsg=4326)
+            # Use geopandas __geo_interface__; clean properties for admin map
+            raw = gdf.__geo_interface__
+            for feat in raw["features"]:
+                props = feat.get("properties") or {}
+                # Add population alias for admin (expects POPULATION or population)
+                if "TotalPop" in props and props["TotalPop"] is not None:
+                    try:
+                        props["population"] = int(props["TotalPop"])
+                    except (TypeError, ValueError):
+                        pass
+                # Drop NaN/NaT and ensure JSON-serializable values
+                def _serialize(v):
+                    if v is None or (isinstance(v, float) and v != v):
+                        return None
+                    if hasattr(v, "isoformat"):
+                        return v.isoformat()
+                    if hasattr(v, "item"):  # numpy scalar
+                        return v.item()
+                    return v
+
+                feat["properties"] = {
+                    k: _serialize(v)
+                    for k, v in props.items()
+                    if _serialize(v) is not None
+                }
+            _GEOJSON_CACHE = raw
+            return _GEOJSON_CACHE
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to load ward GPKG: {e}",
+            ) from e
+
+    # 2. Fallback to GeoJSON files
+    for fp in geojson_candidates:
         if fp.is_file():
             with fp.open("r", encoding="utf-8") as f:
                 _GEOJSON_CACHE = json.load(f)
-                return JSONResponse(
-                    content=_GEOJSON_CACHE,
-                    headers={"Cache-Control": "public, max-age=86400"},
-                )
-    raise HTTPException(status.HTTP_404_NOT_FOUND, "Ward GeoJSON not found")
+                return _GEOJSON_CACHE
+
+    raise HTTPException(status.HTTP_404_NOT_FOUND, "Ward GeoJSON not found (no delhi_wards.gpkg or delhi_wards.geojson)")
+
+
+@router.get(
+    "/wards/geojson",
+    summary="View ward boundaries on map",
+    description="Get the digital boundaries of all wards to show them on a map.",
+    operation_id="fetchWardBoundariesGeoJSON",
+)
+async def wards_geojson():
+    geojson = _load_ward_geojson()
+    return JSONResponse(
+        content=geojson,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.get(
     "/wards/{ward_id}",
     response_model=WardOut,
-    summary="Get ward by ID",
-    description="Return a single ward. **Access:** public (no auth).",
+    summary="View specific ward details",
+    description="See name, representative, and location info for a particular ward.",
+    operation_id="fetchSpecificWardDetails",
 )
 async def get_ward(
     ward_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Ward).options(selectinload(Ward.zone)).where(Ward.id == ward_id))
+    result = await db.execute(select(Ward).options(selectinload(Ward.zone), selectinload(Ward.party)).where(Ward.id == ward_id))
     w = result.scalar_one_or_none()
     if not w:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ward not found")
@@ -278,8 +344,9 @@ async def get_ward(
 @router.patch(
     "/wards/{ward_id}",
     response_model=WardOut,
-    summary="Update ward",
-    description="Update a ward. **Access:** fieldManager or admin only.",
+    summary="Update ward information",
+    description="Change the details of a ward, such as its name or representative.",
+    operation_id="modifyWardInformation",
 )
 async def update_ward(
     ward_id: uuid.UUID,
@@ -287,7 +354,7 @@ async def update_ward(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_manager),
 ):
-    result = await db.execute(select(Ward).options(selectinload(Ward.zone)).where(Ward.id == ward_id))
+    result = await db.execute(select(Ward).options(selectinload(Ward.zone), selectinload(Ward.party)).where(Ward.id == ward_id))
     w = result.scalar_one_or_none()
     if not w:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ward not found")
@@ -307,9 +374,20 @@ async def update_ward(
         w.representative_name = body.representative_name
     if body.representative_phone is not None:
         w.representative_phone = body.representative_phone
+    if "party_id" in body.model_fields_set:
+        if body.party_id:
+            p = (await db.execute(select(PoliticalParty).where(PoliticalParty.id == body.party_id))).scalar_one_or_none()
+            if not p:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Political party not found")
+            w.party_id = body.party_id
+            w.representative_party = None
+        else:
+            w.party_id = None
+    if "representative_email" in body.model_fields_set:
+        w.representative_email = body.representative_email
     await db.commit()
     await db.refresh(w)
-    result = await db.execute(select(Ward).options(selectinload(Ward.zone)).where(Ward.id == ward_id))
+    result = await db.execute(select(Ward).options(selectinload(Ward.zone), selectinload(Ward.party)).where(Ward.id == ward_id))
     w = result.scalar_one()
     return _get_ward_out(w)
 
@@ -317,8 +395,9 @@ async def update_ward(
 @router.delete(
     "/wards/{ward_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete ward",
-    description="Delete a ward. Grievances/field assistants referencing it will have ward_id set to NULL. **Access:** fieldManager or admin only.",
+    summary="Remove a ward",
+    description="Delete a ward from the city records.",
+    operation_id="deleteCityWard",
 )
 async def delete_ward(
     ward_id: uuid.UUID,
@@ -336,8 +415,9 @@ async def delete_ward(
     "/wards",
     response_model=WardOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Create ward",
-    description="Create a new ward under a zone. **Access:** fieldManager or admin only (Bearer required).",
+    summary="Create a new ward",
+    description="Add a new ward to a specific administrative zone.",
+    operation_id="addNewCityWardRecord",
     response_description="Created ward.",
 )
 async def create_ward(
@@ -353,19 +433,171 @@ async def create_ward(
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status.HTTP_409_CONFLICT, "Ward number already exists in this zone")
+    if body.party_id:
+        p = (await db.execute(select(PoliticalParty).where(PoliticalParty.id == body.party_id))).scalar_one_or_none()
+        if not p:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Political party not found")
     ward = Ward(
         zone_id=body.zone_id,
         name=body.name,
         number=body.number,
         representative_name=body.representative_name,
         representative_phone=body.representative_phone or None,
+        party_id=body.party_id,
+        representative_email=body.representative_email,
     )
     db.add(ward)
     await db.commit()
     await db.refresh(ward)
-    result = await db.execute(select(Ward).options(selectinload(Ward.zone)).where(Ward.id == ward.id))
+    result = await db.execute(select(Ward).options(selectinload(Ward.zone), selectinload(Ward.party)).where(Ward.id == ward.id))
     w = result.scalar_one()
     return _get_ward_out(w)
+
+
+# ---------------------------------------------------------------------------
+# Political Parties
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/parties",
+    response_model=list[PoliticalPartyOut],
+    summary="Browse political parties",
+    description="List all political parties for ward analytics.",
+    operation_id="listPoliticalParties",
+)
+async def list_parties(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(PoliticalParty).order_by(PoliticalParty.name))
+    return [PoliticalPartyOut.model_validate(p) for p in result.scalars().all()]
+
+
+@router.post(
+    "/parties",
+    response_model=PoliticalPartyOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create political party",
+    description="Add a new political party.",
+    operation_id="createPoliticalParty",
+)
+async def create_party(
+    body: PoliticalPartyCreate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    party = PoliticalParty(
+        name=body.name,
+        short_code=body.short_code,
+        color=body.color,
+    )
+    db.add(party)
+    await db.commit()
+    await db.refresh(party)
+    return PoliticalPartyOut.model_validate(party)
+
+
+@router.get(
+    "/parties/analytics/grievances",
+    summary="Grievance stats by political party",
+    description="Count of grievances by status per party (for charts and dashboards).",
+    operation_id="getPartyGrievanceAnalytics",
+)
+async def party_grievance_analytics(db: AsyncSession = Depends(get_db)):
+    from app.models.models import Grievance
+
+    stmt = (
+        select(
+            PoliticalParty.id,
+            PoliticalParty.name,
+            PoliticalParty.short_code,
+            PoliticalParty.color,
+            Grievance.status,
+            func.count(Grievance.id).label("count"),
+        )
+        .select_from(PoliticalParty)
+        .join(Ward, Ward.party_id == PoliticalParty.id)
+        .join(Grievance, Grievance.ward_id == Ward.id)
+        .group_by(PoliticalParty.id, PoliticalParty.name, PoliticalParty.short_code, PoliticalParty.color, Grievance.status)
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+    by_party: dict[uuid.UUID, dict] = {}
+    for r in rows:
+        pid = r[0]
+        if pid not in by_party:
+            by_party[pid] = {
+                "party_id": str(pid),
+                "party_name": r[1],
+                "short_code": r[2],
+                "color": r[3],
+                "escalated": 0,
+                "pending": 0,
+                "assigned": 0,
+                "inprogress": 0,
+                "resolved": 0,
+                "total": 0,
+            }
+        status_val = (r[4] or "pending").lower()
+        count = r[5] or 0
+        if status_val in by_party[pid]:
+            by_party[pid][status_val] = count
+        by_party[pid]["total"] += count
+    return list(by_party.values())
+
+
+@router.get(
+    "/parties/{party_id}",
+    response_model=PoliticalPartyOut,
+    summary="View party details",
+    operation_id="getPoliticalParty",
+)
+async def get_party(party_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    p = (await db.execute(select(PoliticalParty).where(PoliticalParty.id == party_id))).scalar_one_or_none()
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Political party not found")
+    return PoliticalPartyOut.model_validate(p)
+
+
+@router.patch(
+    "/parties/{party_id}",
+    response_model=PoliticalPartyOut,
+    summary="Update political party",
+    operation_id="updatePoliticalParty",
+)
+async def update_party(
+    party_id: uuid.UUID,
+    body: PoliticalPartyUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    p = (await db.execute(select(PoliticalParty).where(PoliticalParty.id == party_id))).scalar_one_or_none()
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Political party not found")
+    if body.name is not None:
+        p.name = body.name
+    if body.short_code is not None:
+        p.short_code = body.short_code
+    if body.color is not None:
+        p.color = body.color
+    await db.commit()
+    await db.refresh(p)
+    return PoliticalPartyOut.model_validate(p)
+
+
+@router.delete(
+    "/parties/{party_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete political party",
+    operation_id="deletePoliticalParty",
+)
+async def delete_party(
+    party_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_manager),
+):
+    p = (await db.execute(select(PoliticalParty).where(PoliticalParty.id == party_id))).scalar_one_or_none()
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Political party not found")
+    await db.delete(p)
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -375,8 +607,9 @@ async def create_ward(
 @router.get(
     "/departments",
     response_model=list[DepartmentOut],
-    summary="List departments",
-    description="List all departments. **Access:** public (no auth).",
+    summary="Browse city departments",
+    description="See a list of all official departments that help maintain the city.",
+    operation_id="listOfficialDepartments",
     response_description="List of departments.",
 )
 async def list_departments(db: AsyncSession = Depends(get_db)):
@@ -387,8 +620,9 @@ async def list_departments(db: AsyncSession = Depends(get_db)):
 @router.get(
     "/departments/{dept_id}",
     response_model=DepartmentOut,
-    summary="Get department by ID",
-    description="Return a single department. **Access:** public (no auth).",
+    summary="View department details",
+    description="See detailed info about a specific city department, like its role and manager title.",
+    operation_id="fetchDepartmentSpecificDetails",
 )
 async def get_department(dept_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     dept = (await db.execute(select(Department).where(Department.id == dept_id))).scalar_one_or_none()
@@ -400,8 +634,9 @@ async def get_department(dept_id: uuid.UUID, db: AsyncSession = Depends(get_db))
 @router.patch(
     "/departments/{dept_id}",
     response_model=DepartmentOut,
-    summary="Update department",
-    description="Update a department. **Access:** fieldManager or admin only.",
+    summary="Update department details",
+    description="Modify a department's information, like its colors or contact tags.",
+    operation_id="updateDepartmentConfiguration",
 )
 async def update_department(
     dept_id: uuid.UUID,
@@ -429,6 +664,10 @@ async def update_department(
         dept.assistant_title = body.assistant_title
     if body.jurisdiction_label is not None:
         dept.jurisdiction_label = body.jurisdiction_label
+    if body.sdg is not None:
+        dept.sdg = body.sdg
+    if body.description is not None:
+        dept.description = body.description
     await db.commit()
     await db.refresh(dept)
     return DepartmentOut.model_validate(dept)
@@ -437,8 +676,9 @@ async def update_department(
 @router.delete(
     "/departments/{dept_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete department",
-    description="Delete a department. Fails if it has categories or field assistants. **Access:** fieldManager or admin only.",
+    summary="Remove a department",
+    description="Delete a department record. Only possible if no categories or staff are linked to it.",
+    operation_id="discardDepartmentRecord",
 )
 async def delete_department(
     dept_id: uuid.UUID,
@@ -462,8 +702,9 @@ async def delete_department(
     "/departments",
     response_model=DepartmentOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Create department",
-    description="Create a new department. **Access:** fieldManager or admin only (Bearer required).",
+    summary="Register a new department",
+    description="Add a new official department to the city management system.",
+    operation_id="registerNewOfficialDepartment",
     response_description="Created department.",
 )
 async def create_department(
@@ -482,6 +723,8 @@ async def create_department(
         manager_title=body.manager_title,
         assistant_title=body.assistant_title,
         jurisdiction_label=body.jurisdiction_label,
+        sdg=body.sdg,
+        description=body.description,
     )
     db.add(dept)
     await db.commit()
@@ -492,8 +735,9 @@ async def create_department(
 @router.get(
     "/departments/{dept_id}/categories",
     response_model=list[DepartmentCategoryOut],
-    summary="List categories by department",
-    description="List grievance categories for a department. **Access:** public (no auth).",
+    summary="Browse issue categories by department",
+    description="See the types of issues a specific department handles.",
+    operation_id="listGrievanceCategoriesByDept",
     response_description="List of categories.",
 )
 async def list_categories(dept_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
@@ -507,8 +751,9 @@ async def list_categories(dept_id: uuid.UUID, db: AsyncSession = Depends(get_db)
     "/departments/{dept_id}/categories",
     response_model=DepartmentCategoryOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Create grievance category",
-    description="Create a grievance category under a department. **Access:** fieldManager or admin only (Bearer required).",
+    summary="Add a new issue category",
+    description="Create a new type of issue that citizens can report to a department.",
+    operation_id="createNewGrievanceCategory",
     response_description="Created category.",
 )
 async def create_category(
@@ -530,8 +775,9 @@ async def create_category(
 @router.get(
     "/categories",
     response_model=list[CategoryListOut],
-    summary="List all categories",
-    description="List all grievance categories with department name (for admin listing). **Access:** public (no auth).",
+    summary="View all issue types",
+    description="See every type of issue that can be reported across all departments.",
+    operation_id="listAllReportableCategories",
     response_description="List of categories with dept_name.",
 )
 async def list_all_categories(db: AsyncSession = Depends(get_db)):
@@ -549,8 +795,9 @@ async def list_all_categories(db: AsyncSession = Depends(get_db)):
 @router.get(
     "/categories/{cat_id}",
     response_model=DepartmentCategoryOut,
-    summary="Get category by ID",
-    description="Return a single grievance category. **Access:** public (no auth).",
+    summary="See specific category details",
+    description="Get detailed info about a single issue category.",
+    operation_id="fetchGrievanceCategoryDetails",
 )
 async def get_category(cat_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     cat = (await db.execute(select(GrievanceCategory).where(GrievanceCategory.id == cat_id))).scalar_one_or_none()
@@ -562,8 +809,9 @@ async def get_category(cat_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 @router.patch(
     "/categories/{cat_id}",
     response_model=DepartmentCategoryOut,
-    summary="Update category",
-    description="Update a grievance category. **Access:** fieldManager or admin only.",
+    summary="Modify issue category",
+    description="Rename or update an existing issue category.",
+    operation_id="updateGrievanceCategoryName",
 )
 async def update_category(
     cat_id: uuid.UUID,
@@ -584,8 +832,9 @@ async def update_category(
 @router.delete(
     "/categories/{cat_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete category",
-    description="Delete a category. Grievances referencing it will have category_id set to NULL. **Access:** fieldManager or admin only.",
+    summary="Remove an issue category",
+    description="Delete a category from the list of reportable issues.",
+    operation_id="removeGrievanceCategory",
 )
 async def delete_category(
     cat_id: uuid.UUID,

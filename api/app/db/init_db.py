@@ -152,6 +152,64 @@ DO $$ BEGIN
 END $$;
 """
 
+ADD_WARDS_REPRESENTATIVE_PARTY = """
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'wards' AND column_name = 'representative_party'
+  ) THEN
+    ALTER TABLE wards ADD COLUMN representative_party VARCHAR(255);
+  END IF;
+END $$;
+"""
+
+ADD_WARDS_REPRESENTATIVE_EMAIL = """
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'wards' AND column_name = 'representative_email'
+  ) THEN
+    ALTER TABLE wards ADD COLUMN representative_email VARCHAR(255);
+  END IF;
+END $$;
+"""
+
+ADD_WARDS_PARTY_ID = """
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'wards' AND column_name = 'party_id'
+  ) THEN
+    ALTER TABLE wards ADD COLUMN party_id UUID REFERENCES political_parties(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+"""
+
+# Migrate representative_party strings to party_id (idempotent)
+MIGRATE_WARDS_PARTY = """
+DO $$
+DECLARE
+  rec RECORD;
+  new_party_id UUID;
+BEGIN
+  FOR rec IN
+    SELECT DISTINCT TRIM(representative_party) AS party_name
+    FROM wards
+    WHERE representative_party IS NOT NULL AND TRIM(representative_party) != ''
+      AND party_id IS NULL
+  LOOP
+    SELECT id INTO new_party_id FROM political_parties WHERE name = rec.party_name LIMIT 1;
+    IF new_party_id IS NULL THEN
+      INSERT INTO political_parties (id, name, short_code)
+      VALUES (gen_random_uuid(), rec.party_name, UPPER(LEFT(rec.party_name, 3)))
+      RETURNING id INTO new_party_id;
+    END IF;
+    UPDATE wards SET party_id = new_party_id
+    WHERE TRIM(representative_party) = rec.party_name AND party_id IS NULL;
+  END LOOP;
+END $$;
+"""
+
 # Migrate departments.id and referencing columns from VARCHAR to UUID (referenced column must be done first)
 ALTER_DEPARTMENTS_ID_AND_FKS_TO_UUID = """
 DO $$ BEGIN
@@ -259,6 +317,49 @@ DO $$ BEGIN
     ALTER TABLE grievances ADD COLUMN citizen_rating INTEGER;
   END IF;
 END $$;
+"""
+
+ADD_WORKER_PROFILES_RATINGS_COUNT_COLUMN = """
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'worker_profiles' AND column_name = 'ratings_count'
+  ) THEN
+    ALTER TABLE worker_profiles ADD COLUMN ratings_count INTEGER DEFAULT 0;
+  END IF;
+END $$;
+"""
+
+# grievance_resolution_ratings: one row per citizen rating (handles reopen — each resolution gets its own rating)
+# Split into two statements: asyncpg cannot execute multiple commands in one prepared statement
+CREATE_GRIEVANCE_RESOLUTION_RATINGS_TABLE = """
+CREATE TABLE IF NOT EXISTS grievance_resolution_ratings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    grievance_id UUID NOT NULL REFERENCES grievances(id) ON DELETE CASCADE,
+    worker_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    rating INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)
+"""
+CREATE_GRIEVANCE_RESOLUTION_RATINGS_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_grievance_resolution_ratings_worker_id
+    ON grievance_resolution_ratings(worker_id)
+"""
+
+# Backfill from existing grievances.citizen_rating (one-time, idempotent: only if table empty)
+# Include id and created_at explicitly (table may have been created by SQLAlchemy without server DEFAULTs)
+BACKFILL_GRIEVANCE_RESOLUTION_RATINGS = """
+INSERT INTO grievance_resolution_ratings (id, grievance_id, worker_id, rating, created_at)
+SELECT gen_random_uuid(), g.id, sub.assigned_to_id, g.citizen_rating, NOW()
+FROM grievances g
+JOIN (
+    SELECT DISTINCT ON (grievance_id) grievance_id, assigned_to_id
+    FROM assignments
+    WHERE status = 'completed' AND assigned_to_id IS NOT NULL
+    ORDER BY grievance_id, assigned_at DESC
+) sub ON sub.grievance_id = g.id
+WHERE g.citizen_rating IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM grievance_resolution_ratings grr WHERE grr.grievance_id = g.id);
 """
 
 ADD_COMPLAINT_STATUS_ESCALATED = """
@@ -451,6 +552,10 @@ async def init_db() -> None:
         await conn.execute(text(ADD_USERS_ADDRESS_COLUMN.strip()))
         await conn.execute(text(ADD_WARDS_REPRESENTATIVE_NAME.strip()))
         await conn.execute(text(ADD_WARDS_REPRESENTATIVE_PHONE.strip()))
+        await conn.execute(text(ADD_WARDS_REPRESENTATIVE_PARTY.strip()))
+        await conn.execute(text(ADD_WARDS_REPRESENTATIVE_EMAIL.strip()))
+        await conn.execute(text(ADD_WARDS_PARTY_ID.strip()))
+        await conn.execute(text(MIGRATE_WARDS_PARTY.strip()))
         await conn.execute(text(ALTER_DEPARTMENTS_ID_AND_FKS_TO_UUID.strip()))
         await conn.execute(text(ALTER_GRIEVANCE_CATEGORIES_DEPT_ID_UUID.strip()))
         await conn.execute(text(ALTER_WORKER_PROFILES_DEPARTMENT_ID_UUID.strip()))
@@ -458,6 +563,10 @@ async def init_db() -> None:
         await conn.execute(text(ADD_COMPLAINT_STATUS_ESCALATED.strip()))
         await conn.execute(text(ADD_GRIEVANCES_IS_SENSITIVE_COLUMN.strip()))
         await conn.execute(text(ADD_GRIEVANCES_CITIZEN_RATING_COLUMN.strip()))
+        await conn.execute(text(ADD_WORKER_PROFILES_RATINGS_COUNT_COLUMN.strip()))
+        await conn.execute(text(CREATE_GRIEVANCE_RESOLUTION_RATINGS_TABLE.strip()))
+        await conn.execute(text(CREATE_GRIEVANCE_RESOLUTION_RATINGS_INDEX.strip()))
+        await conn.execute(text(BACKFILL_GRIEVANCE_RESOLUTION_RATINGS.strip()))
         await conn.execute(text(ADD_INTERNAL_MESSAGES_CONVERSATION_ID_COLUMN.strip()))
         await conn.execute(text(ADD_CONVERSATIONS_GRIEVANCE_ID_COLUMN.strip()))
         await conn.execute(text(ALTER_INTERNAL_MESSAGES_RECEIVER_ID_NULLABLE.strip()))

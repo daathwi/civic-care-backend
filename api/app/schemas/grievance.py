@@ -43,6 +43,8 @@ class AuditLogOut(BaseModel):
     description: str | None = Field(None, description="Event description.")
     icon_name: str | None = Field(None, description="Icon name for UI.")
     created_at: datetime = Field(..., description="When the event occurred.")
+    actor_id: uuid.UUID | None = Field(None, description="User who performed the action.")
+    actor_name: str | None = Field(None, description="Display name of the user who performed the action.")
 
 
 class MediaOut(BaseModel):
@@ -93,8 +95,10 @@ class GrievanceListItem(BaseModel):
     priority: str = Field(..., description="low, medium, or high.")
     category_name: str | None = Field(None, description="Grievance category name.")
     category_dept_id: uuid.UUID | None = Field(None, description="Department UUID of the category.")
+    department_name: str | None = Field(None, description="Department name (category's department).")
     ward_name: str | None = Field(None, description="Ward name.")
     ward_number: int | None = Field(None, description="Ward number.")
+    zone_name: str | None = Field(None, description="Zone name of the ward.")
     reporter_name: str | None = Field(None, description="Name of the citizen who reported.")
     reporter_phone: str | None = Field(None, description="Phone number of the citizen who reported.")
     upvotes_count: int = Field(..., description="Number of upvotes.")
@@ -105,8 +109,13 @@ class GrievanceListItem(BaseModel):
     is_sensitive: bool = Field(False, description="True if the image contains disturbing content.")
     citizen_rating: int | None = Field(None, description="Citizen's rating of the resolution (1-5). None if not yet rated.")
     reopen_count: int = Field(0, description="Number of times reopened due to poor rating.")
+    effective_priority: str | None = Field(None, description="Computed priority from stored priority + reopen_count (reopens bump severity).")
     assigned_to_name: str | None = Field(None, description="Name of the currently assigned field assistant.")
-    assigned_to_id: uuid.UUID | None = Field(None, description="UUID of the currently assigned field assistant.")
+    assigned_to_phone: str | None = Field(None, description="Phone number of the currently assigned field assistant.")
+    ai_suggested_worker_id: uuid.UUID | None = Field(None, description="AI recommended worker UUID.")
+    ai_suggested_worker_name: str | None = Field(None, description="AI recommended worker's name.")
+    ai_suggestion_reason: str | None = Field(None, description="AI's reasoning for this recommendation.")
+    eps_score: float | None = Field(None, description="Escalation Priority Score (0-100). Only populated for escalated items.")
 
 
 class GrievanceDetail(GrievanceListItem):
@@ -114,6 +123,7 @@ class GrievanceDetail(GrievanceListItem):
 
     reporter_id: uuid.UUID | None = Field(None, description="Reporter user UUID.")
     worker_contact: str | None = Field(None, description="Phone of the assigned field assistant.")
+    ai_suggested_worker_name: str | None = Field(None, description="AI recommended worker's name.")
     assigned_by_name: str | None = Field(None, description="Name of the manager/admin who assigned.")
     assigned_by_phone: str | None = Field(None, description="Phone of the manager/admin who assigned.")
     resolution_image_url: str | None = Field(None, description="URL of resolution proof image (deprecated; use resolution_media_url).")
@@ -131,26 +141,26 @@ class GrievanceDetail(GrievanceListItem):
 class GrievanceCreate(BaseModel):
     """Request body for creating a grievance. Access: any authenticated user. Send department_id first; category_id must belong to that department."""
 
-    title: str | None = Field(None, max_length=255, description="Short title of the grievance.")
-    description: str | None = Field(None, description="Optional detailed description.")
-    lat: Decimal = Field(..., description="Latitude of the issue location.")
-    lng: Decimal = Field(..., description="Longitude of the issue location.")
-    address: str | None = Field(None, description="Optional address or place name.")
-    priority: str = Field(default="medium", description="low, medium, or high.")
-    department_id: uuid.UUID | None = Field(None, description="Department UUID (choose first; categories are filtered by this).")
-    category_id: uuid.UUID | None = Field(None, description="Grievance category UUID (must belong to department_id).")
-    ward_id: uuid.UUID | None = Field(None, description="Ward UUID (optional).")
-    media_urls: list[str] = Field(default_factory=list, description="URLs of images/videos to attach.")
-    is_sensitive: bool = Field(False, description="Flag as sensitive content.")
+    title: str | None = Field(None, max_length=255, description="Short title of the grievance. [human centric]")
+    description: str | None = Field(None, description="Optional detailed description. [human centric]")
+    lat: Decimal = Field(..., description="Latitude of the issue location. [human centric]")
+    lng: Decimal = Field(..., description="Longitude of the issue location. [human centric]")
+    address: str | None = Field(None, description="Optional address or place name. [human centric]")
+    priority: str = Field(default="medium", description="low, medium, or high. [human centric]")
+    department_id: uuid.UUID | None = Field(None, description="Department UUID (choose first; categories are filtered by this). [system centric]")
+    category_id: uuid.UUID | None = Field(None, description="Grievance category UUID (must belong to department_id). [system centric]")
+    ward_id: uuid.UUID | None = Field(None, description="Ward UUID (optional). [system centric]")
+    media_urls: list[str] = Field(default_factory=list, description="URLs of images/videos to attach. [system centric]")
+    is_sensitive: bool = Field(False, description="Flag as sensitive content. [human centric]")
 
 
 class GrievanceUpdate(BaseModel):
     """Request body for updating a grievance. Access: fieldAssistant or admin only (not fieldManager)."""
 
-    status: ComplaintStatus | None = Field(None, description="New status: pending, assigned, inprogress, or resolved.")
-    priority: str | None = Field(None, description="New priority: low, medium, or high.")
-    resolution_image_url: str | None = Field(None, description="URL of resolution proof image (when marking resolved).")
-    note: str | None = Field(None, description="Optional note for the status update.")
+    status: ComplaintStatus | None = Field(None, description="New status: pending, assigned, inprogress, resolved, or escalated. [human centric]")
+    priority: str | None = Field(None, description="New priority: low, medium, or high. [human centric]")
+    resolution_image_url: str | None = Field(None, description="URL of resolution proof image (when marking resolved). [system centric]")
+    note: str | None = Field(None, description="Optional note for the status update. [human centric]")
 
 
 class AssignWorkerRequest(BaseModel):

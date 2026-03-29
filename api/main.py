@@ -1,9 +1,11 @@
+import asyncio
 import logging
 import os
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Any
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+
+from fastapi_mcp import FastApiMCP
 
 from app.core.config import settings
 from app.api.v1.router import api_router
@@ -38,6 +42,41 @@ def _get_network_ip() -> str | None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Run DB migrations (creates missing tables, e.g. grievance_resolution_ratings)
+    # from app.db.init_db import init_db
+    # await init_db()
+    # logger.info("Database initialized")
+
+    try:
+        from app.db.ensure_schema import ensure_civic_impact_score_snapshots_table
+
+        await ensure_civic_impact_score_snapshots_table()
+    except Exception:
+        logger.exception("Could not ensure civic_impact_score_snapshots table (CIS features may fail until DB is updated)")
+
+    try:
+        from app.db.ensure_schema import (
+            ensure_cis_scheduler_and_user_last_cis,
+            ensure_department_sdg_and_description,
+        )
+
+        await ensure_cis_scheduler_and_user_last_cis()
+        await ensure_department_sdg_and_description()
+    except Exception:
+        logger.exception("Could not ensure CIS scheduler/user columns or department SDG/description columns")
+
+    # Start escalation cron job (every 15 minutes)
+    from app.services.escalation_cron import escalate_overdue_grievances
+    from app.services.cis_cron import maybe_run_scheduled_cis
+
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(escalate_overdue_grievances, "interval", minutes=15, id="escalate_overdue_grievances")
+    # Rolling CIS (IST): hourly check; runs when next_run_at reached (now + 7d after each run)
+    scheduler.add_job(maybe_run_scheduled_cis, "interval", hours=1, id="cis_scheduled_check")
+    scheduler.start()
+    logger.info("Escalation cron job started (every 15 min)")
+    logger.info("CIS scheduler started (hourly check; next run from DB, +7d IST after each update)")
+
     # Print URLs to console (network URL works only if server was started with --host 0.0.0.0)
     port = os.environ.get("PORT", "8000")
     network_ip = _get_network_ip()
@@ -53,6 +92,8 @@ async def lifespan(app: FastAPI):
     print("  Run: uv run start   or   uvicorn main:app --reload --host 0.0.0.0")
     print("=" * 60 + "\n")
     yield
+
+    scheduler.shutdown(wait=False)
 
 
 app = FastAPI(
@@ -77,6 +118,7 @@ Protected routes require `Authorization: Bearer <access_token>`.
         {"name": "field assistants", "description": "Field assistants (fieldManager/fieldAssistant). List/get: public. Create: fieldManager or admin."},
         {"name": "attendance", "description": "Clock-in, clock-out, status. Access: fieldManager, fieldAssistant, or admin."},
         {"name": "wards & departments", "description": "Zones, wards, departments, grievance categories. List/get: public. Create: fieldManager or admin."},
+        {"name": "weather", "description": "Ward weather and air quality (Open-Meteo). Requires auth and ward_id."},
         {"name": "health", "description": "Service health check."},
         {"name": "admin", "description": "Admin dashboard (HTML)."},
     ],
@@ -94,6 +136,19 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(RequestResponseLoggerMiddleware)
 
+# Admin Portal Serving - register before static mount so /admin is explicit
+@app.get(
+    "/admin",
+    tags=["admin"],
+    summary="Admin dashboard",
+    description="Serve the HTML admin dashboard. No auth required to load; create/update actions require staff login.",
+)
+def admin_dashboard():
+    index_path = STATIC_DIR / "admin" / "index.html"
+    if index_path.is_file():
+        return FileResponse(str(index_path), media_type="text/html")
+    return {"message": "Admin dashboard not found"}
+
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 if STATIC_DIR.is_dir():
@@ -109,19 +164,7 @@ ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 
 
-@app.get(
-    "/admin",
-    tags=["admin"],
-    summary="Admin dashboard",
-    description="Serve the HTML admin dashboard. No auth required to load; create/update actions require staff login.",
-)
-def admin_dashboard():
-    index_path = STATIC_DIR / "admin" / "index.html"
-    if index_path.is_file():
-        return FileResponse(index_path)
-    return {"message": "Admin dashboard not found"}
-
-
+# Health Check
 @app.get(
     "/health",
     tags=["health"],
@@ -144,3 +187,10 @@ def start():
 
 if __name__ == "__main__":
     start()
+
+
+# MCP Tools 
+mcp = FastApiMCP(app)
+mcp.mount_http()
+
+# MCP URL : http://localhost:8000/mcp

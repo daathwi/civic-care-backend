@@ -105,3 +105,9 @@ async def require_staff(user: User = Depends(get_current_user)) -> User:
     if _role_str(user) not in ("fieldManager", "fieldAssistant", "admin"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Staff role required")
     return user
+
+
+async def require_admin(user: User = Depends(get_current_user)) -> User:
+    if _role_str(user) != "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin role required")
+    return user

@@ -31,8 +31,9 @@ def _ensure_dirs():
 @router.post(
     "/grievance-photo",
     status_code=status.HTTP_201_CREATED,
-    summary="Upload grievance photo",
-    description="Upload a photo for a grievance. Returns the URL to reference in grievance creation.",
+    summary="Upload an issue photo",
+    description="Upload a picture of the problem you're reporting. This helps our team understand the issue better.",
+    operation_id="uploadIssueImageContent",
 )
 async def upload_grievance_photo(
     file: UploadFile = File(...),
@@ -44,8 +45,9 @@ async def upload_grievance_photo(
 @router.post(
     "/resolution-photo",
     status_code=status.HTTP_201_CREATED,
-    summary="Upload resolution proof photo",
-    description="Upload a resolution proof photo. Returns the URL to reference in grievance update.",
+    summary="Upload resolution proof",
+    description="Upload a photo as proof that the issue has been fixed.",
+    operation_id="uploadResolutionProofImage",
 )
 async def upload_resolution_photo(
     file: UploadFile = File(...),
@@ -57,8 +59,9 @@ async def upload_resolution_photo(
 @router.post(
     "/grievance-audio",
     status_code=status.HTTP_201_CREATED,
-    summary="Upload grievance audio",
-    description="Upload a voice recording for a grievance. Returns the URL to reference in grievance creation.",
+    summary="Upload a voice note",
+    description="Share a voice recording to provide more context about the issue you're reporting.",
+    operation_id="uploadIssueAudioRecording",
 )
 async def upload_grievance_audio(
     file: UploadFile = File(...),

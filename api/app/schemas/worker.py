@@ -54,14 +54,15 @@ class WorkerOut(BaseModel):
     zone_id: uuid.UUID | None = Field(None, description="Zone UUID.")
     ward_id: uuid.UUID | None = Field(None, description="Ward UUID.")
     last_active_ward: str | None = Field(None, description="Last ward where the field assistant was active.")
-    rating: float | None = Field(None, description="Field assistant rating.")
+    rating: float | None = Field(None, description="Average citizen rating (1-5) from resolved grievances.")
+    ratings_count: int = Field(0, description="Number of citizen ratings received.")
     tasks_completed: int = Field(0, description="Number of tasks completed.")
     tasks_active: int = Field(0, description="Number of active tasks.")
     status: str | None = Field(None, description="onDuty or offDuty.")
     last_active_lat: float | None = Field(None, description="Last known latitude.")
     last_active_lng: float | None = Field(None, description="Last known longitude.")
 
-    @field_validator("tasks_completed", "tasks_active", mode="before")
+    @field_validator("tasks_completed", "tasks_active", "ratings_count", mode="before")
     @classmethod
     def coerce_none_to_zero(cls, v: int | None) -> int:
         return 0 if v is None else v

@@ -3,8 +3,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
+from sqlalchemy import String, func, select, case, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
@@ -13,11 +13,14 @@ from app.api.deps import get_current_user, require_can_update_grievance, require
 from app.db.database import get_db
 from app.services.delhi_ward_lookup import get_ward_from_location
 from app.services.ward_lookup import lookup_ward_by_coords
+from app.services.worker_rating_service import recalculate_worker_rating
 from app.models.models import (
     Assignment, AuditLog, Grievance, GrievanceCategory,
-    GrievanceComment, GrievanceMedia, GrievanceVote,
+    GrievanceComment, GrievanceMedia, GrievanceResolutionRating, GrievanceVote,
     User, Ward, WorkerProfile, Conversation
 )
+from app.services.eps_service import get_ward_maxima, calculate_eps
+from app.services.ollama_service import is_spam, recommend_worker_task
 from app.schemas.grievance import (
     AssignWorkerRequest, AssignmentOut, AuditLogOut,
     CommentCreate, CommentOut, GrievanceCreate, GrievanceDetail,
@@ -27,6 +30,7 @@ from app.schemas.grievance import (
 from app.api.v1.endpoints.chat import broadcast_comment
 
 router = APIRouter(prefix="/grievances", tags=["grievances"])
+MAX_REOPEN_BEFORE_ESCALATION = 3
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +56,8 @@ def _audit_icon_for_event(title: str | None = None, status: str | None = None) -
         return "schedule_rounded"
     if s_val == "assigned":
         return "assignment_ind_rounded"
+    if s_val == "escalated" or "escalated" in t:
+        return "report_problem"
     # Default for generic "Updated" or unknown
     return "update_rounded"
 
@@ -61,6 +67,8 @@ def _to_list_item(g: Grievance) -> GrievanceListItem:
         (a for a in (g.assignments or []) if a.status != "completed"),
         None,
     )
+    # For resolved grievances, all assignments are completed; use most recent for assigned_to
+    assignee = active if active else (g.assignments[0] if g.assignments else None)
     first_image = next(
         (m.media_url for m in (g.media or []) if m.type == "image" and not m.is_resolution_proof),
         None,
@@ -69,6 +77,15 @@ def _to_list_item(g: Grievance) -> GrievanceListItem:
         (m.media_url for m in (g.media or []) if m.type == "audio"),
         None,
     )
+    # Effective priority: reopens bump severity (reopen_count >= 2 → high; reopen_count == 1 → bump one level)
+    stored = (g.priority or "medium").lower()
+    rc = g.reopen_count or 0
+    if rc >= 2:
+        effective = "high"
+    elif rc == 1:
+        effective = "high" if stored in ("medium", "high") else "medium"
+    else:
+        effective = stored
     return GrievanceListItem(
         id=g.id,
         title=g.title,
@@ -80,8 +97,10 @@ def _to_list_item(g: Grievance) -> GrievanceListItem:
         priority=g.priority,
         category_name=g.category.name if g.category else None,
         category_dept_id=g.category.dept_id if g.category else None,
+        department_name=g.category.department.name if g.category and g.category.department else None,
         ward_name=g.ward.name if g.ward else None,
         ward_number=g.ward.number if g.ward else None,
+        zone_name=g.ward.zone.name if g.ward and g.ward.zone else None,
         reporter_name=g.reporter.name if g.reporter else None,
         reporter_phone=g.reporter.phone if g.reporter else None,
         upvotes_count=g.upvotes_count,
@@ -92,8 +111,13 @@ def _to_list_item(g: Grievance) -> GrievanceListItem:
         is_sensitive=g.is_sensitive,
         citizen_rating=g.citizen_rating,
         reopen_count=g.reopen_count,
-        assigned_to_name=active.assigned_to.name if active and active.assigned_to else None,
-        assigned_to_id=active.assigned_to_id if active else None,
+        effective_priority=effective,
+        assigned_to_name=assignee.assigned_to.name if assignee and assignee.assigned_to else None,
+        assigned_to_id=assignee.assigned_to_id if assignee else None,
+        assigned_to_phone=assignee.assigned_to.phone if assignee and assignee.assigned_to else None,
+        ai_suggested_worker_id=g.ai_suggested_worker_id,
+        ai_suggested_worker_name=g.ai_suggested_worker.name if g.ai_suggested_worker else None,
+        ai_suggestion_reason=g.ai_suggestion_reason,
     )
 
 
@@ -102,6 +126,7 @@ def _to_detail(g: Grievance) -> GrievanceDetail:
         (a for a in (g.assignments or []) if a.status != "completed"),
         None,
     )
+    assignee = active if active else (g.assignments[0] if g.assignments else None)
     first_image = next(
         (m.media_url for m in (g.media or []) if m.type == "image" and not m.is_resolution_proof),
         None,
@@ -122,6 +147,8 @@ def _to_detail(g: Grievance) -> GrievanceDetail:
         AuditLogOut(
             id=e.id, title=e.title, description=e.description,
             icon_name=e.icon_name, created_at=e.created_at,
+            actor_id=e.actor_id,
+            actor_name=e.actor.name if e.actor else None,
         )
         for e in (g.audit_logs or [])
     ]
@@ -142,6 +169,15 @@ def _to_detail(g: Grievance) -> GrievanceDetail:
         for a in (g.assignments or [])
     ]
 
+    stored = (g.priority or "medium").lower()
+    rc = g.reopen_count or 0
+    if rc >= 2:
+        effective = "high"
+    elif rc == 1:
+        effective = "high" if stored in ("medium", "high") else "medium"
+    else:
+        effective = stored
+
     return GrievanceDetail(
         id=g.id,
         title=g.title,
@@ -153,6 +189,7 @@ def _to_detail(g: Grievance) -> GrievanceDetail:
         priority=g.priority,
         category_name=g.category.name if g.category else None,
         category_dept_id=g.category.dept_id if g.category else None,
+        department_name=g.category.department.name if g.category and g.category.department else None,
         ward_name=g.ward.name if g.ward else None,
         ward_number=g.ward.number if g.ward else None,
         reporter_id=g.reporter_id,
@@ -165,13 +202,16 @@ def _to_detail(g: Grievance) -> GrievanceDetail:
         is_sensitive=g.is_sensitive,
         citizen_rating=g.citizen_rating,
         reopen_count=g.reopen_count,
-        assigned_to_name=active.assigned_to.name if active and active.assigned_to else None,
-        assigned_to_id=active.assigned_to_id if active else None,
-        worker_contact=active.assigned_to.phone if active and active.assigned_to else None,
-        assigned_by_name=active.assigned_by.name if active and active.assigned_by else None,
-        assigned_by_phone=active.assigned_by.phone if active and active.assigned_by else None,
+        effective_priority=effective,
+        assigned_to_name=assignee.assigned_to.name if assignee and assignee.assigned_to else None,
+        assigned_to_id=assignee.assigned_to_id if assignee else None,
+        worker_contact=assignee.assigned_to.phone if assignee and assignee.assigned_to else None,
+        assigned_by_name=assignee.assigned_by.name if assignee and assignee.assigned_by else None,
+        assigned_by_phone=assignee.assigned_by.phone if assignee and assignee.assigned_by else None,
         resolution_image_url=resolution_img,
         resolution_media_url=resolution_img,
+        ai_suggested_worker_name=g.ai_suggested_worker.name if g.ai_suggested_worker else None,
+        ai_suggestion_reason=g.ai_suggestion_reason,
         comments=comments_out,
         events=events_out,
         media=media_out,
@@ -180,9 +220,10 @@ def _to_detail(g: Grievance) -> GrievanceDetail:
 
 
 _GRIEVANCE_LOAD_OPTIONS = [
-    selectinload(Grievance.category),
-    selectinload(Grievance.ward),
+    selectinload(Grievance.category).selectinload(GrievanceCategory.department),
+    selectinload(Grievance.ward).selectinload(Ward.zone),
     selectinload(Grievance.reporter),
+    selectinload(Grievance.ai_suggested_worker),
     selectinload(Grievance.media),
     selectinload(Grievance.assignments).selectinload(Assignment.assigned_to).selectinload(User.worker_profile),
     selectinload(Grievance.assignments).selectinload(Assignment.assigned_by),
@@ -191,7 +232,7 @@ _GRIEVANCE_LOAD_OPTIONS = [
 _GRIEVANCE_DETAIL_OPTIONS = [
     *_GRIEVANCE_LOAD_OPTIONS,
     selectinload(Grievance.comments).selectinload(GrievanceComment.user),
-    selectinload(Grievance.audit_logs),
+    selectinload(Grievance.audit_logs).selectinload(AuditLog.actor),
     selectinload(Grievance.conversation),
 ]
 
@@ -203,25 +244,31 @@ _GRIEVANCE_DETAIL_OPTIONS = [
 @router.get(
     "",
     response_model=PaginatedGrievances,
-    summary="List grievances",
-    description="Paginated list of grievances. Optional filters: ward_id, ward_name, status, priority, category_dept, reporter_id. **Access:** public (no auth).",
+    summary="Browse reported issues",
+    description="Look through all the issues reported by citizens. You can filter by category, status, or location.",
+    operation_id="browseGrievances",
     response_description="Paginated list of grievance items and total count.",
 )
 async def list_grievances(
     db: AsyncSession = Depends(get_db),
-    ward_id: uuid.UUID | None = Query(None, description="Filter by ward UUID."),
-    ward_name: str | None = Query(None, description="Filter by ward name (partial match)."),
-    status: str | None = Query(None, description="Filter by status: pending, assigned, inprogress, resolved."),
-    priority: str | None = Query(None, description="Filter by priority: low, medium, high."),
-    category_dept: uuid.UUID | None = Query(None, description="Filter by category's department UUID."),
-    reporter_id: uuid.UUID | None = Query(None, description="Filter by reporter user UUID."),
-    worker_id: uuid.UUID | None = Query(None, description="Filter by assigned worker UUID."),
-    skip: int = Query(0, ge=0, description="Number of items to skip (offset)."),
-    limit: int = Query(10, ge=1, le=100, description="Page size (default 10)."),
+    zone_id: uuid.UUID | None = Query(None, description="Filter by zone UUID. Returns grievances in wards of this zone. [system centric]"),
+    ward_id: uuid.UUID | None = Query(None, description="Filter by ward UUID. [system centric]"),
+    ward_name: str | None = Query(None, description="Filter by ward name (partial match). [human centric]"),
+    status: str | None = Query(None, description="Filter by status: pending, assigned, inprogress, resolved, escalated. [human centric]"),
+    priority: str | None = Query(None, description="Filter by priority: low, medium, high. [human centric]"),
+    use_effective_priority: bool = Query(False, description="When True, priority filter uses effective priority (stored + reopen_count)."),
+    category_dept: uuid.UUID | None = Query(None, description="Filter by category's department UUID. [system centric]"),
+    reporter_id: uuid.UUID | None = Query(None, description="Filter by reporter user UUID. [system centric]"),
+    worker_id: uuid.UUID | None = Query(None, description="Filter by assigned worker UUID. [system centric]"),
+    skip: int = Query(0, ge=0, description="Number of items to skip (offset). [system centric]"),
+    limit: int = Query(10, ge=1, le=100, description="Page size (default 10). [system centric]"),
 ):
-    query = select(Grievance).options(*_GRIEVANCE_LOAD_OPTIONS)
-    count_query = select(func.count(Grievance.id))
+    query = select(Grievance).options(*_GRIEVANCE_LOAD_OPTIONS).where(Grievance.is_ai_spam.is_not(True))
+    count_query = select(func.count(Grievance.id)).where(Grievance.is_ai_spam.is_not(True))
 
+    if zone_id:
+        query = query.join(Grievance.ward).where(Ward.zone_id == zone_id)
+        count_query = count_query.join(Grievance.ward).where(Ward.zone_id == zone_id)
     if ward_id:
         query = query.where(Grievance.ward_id == ward_id)
         count_query = count_query.where(Grievance.ward_id == ward_id)
@@ -232,8 +279,20 @@ async def list_grievances(
         query = query.where(Grievance.status == status)
         count_query = count_query.where(Grievance.status == status)
     if priority:
-        query = query.where(Grievance.priority == priority)
-        count_query = count_query.where(Grievance.priority == priority)
+        if use_effective_priority:
+            rc = func.coalesce(Grievance.reopen_count, 0)
+            pri = func.coalesce(cast(Grievance.priority, String), "medium")
+            eff_pri = case(
+                (rc >= 2, "high"),
+                ((rc == 1) & (pri.in_(["medium", "high"])), "high"),
+                ((rc == 1) & (pri == "low"), "medium"),
+                else_=pri,
+            )
+            query = query.where(eff_pri == priority)
+            count_query = count_query.where(eff_pri == priority)
+        else:
+            query = query.where(Grievance.priority == priority)
+            count_query = count_query.where(Grievance.priority == priority)
     if category_dept:
         query = (
             query.join(Grievance.category)
@@ -257,8 +316,26 @@ async def list_grievances(
     result = await db.execute(query)
     grievances = result.scalars().unique().all()
 
+    # Populate EPS for escalated items
+    escalated_items = [g for g in grievances if g.status == "escalated"]
+    eps_map = {}
+    if escalated_items:
+        ward_ids = list({g.ward_id for g in escalated_items if g.ward_id})
+        maxima = await get_ward_maxima(db, ward_ids)
+        for g in escalated_items:
+            m = maxima.get(g.ward_id, {"max_age": 1.0, "max_netvotes": 1.0})
+            eps_data = calculate_eps(g, m["max_age"], m["max_netvotes"])
+            eps_map[g.id] = eps_data["total"]
+
+    items = []
+    for g in grievances:
+        item = _to_list_item(g)
+        if g.id in eps_map:
+            item.eps_score = eps_map[g.id]
+        items.append(item)
+
     return PaginatedGrievances(
-        items=[_to_list_item(g) for g in grievances],
+        items=items,
         total=total,
         skip=skip,
         limit=limit,
@@ -267,14 +344,14 @@ async def list_grievances(
 
 @router.post(
     "",
-    response_model=GrievanceDetail,
+    response_model=GrievanceListItem,
     status_code=status.HTTP_201_CREATED,
-    summary="Create grievance",
-    description="Create a new grievance. Location must be within Delhi ward boundaries. **Access:** any authenticated user (Bearer required).",
-    response_description="Created grievance with full detail.",
+    summary="Report a new grievance",
+    operation_id="createGrievance",
 )
 async def create_grievance(
     body: GrievanceCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -332,6 +409,30 @@ async def create_grievance(
                 except (ValueError, TypeError):
                     pass
 
+    # AI Spam Detection (Phase 1)
+    dept_name = "Unknown"
+    cat_name = "Unknown"
+    
+    if body.department_id:
+        from app.models.models import Department
+        dept_res = await db.execute(select(Department).where(Department.id == body.department_id))
+        dept_row = dept_res.scalar_one_or_none()
+        if dept_row:
+            dept_name = dept_row.name
+            
+    if body.category_id:
+        cat_res = await db.execute(select(GrievanceCategory).where(GrievanceCategory.id == body.category_id))
+        cat_row = cat_res.scalar_one_or_none()
+        if cat_row:
+            cat_name = cat_row.name
+
+    ai_is_spam = await is_spam(
+        title=body.title, 
+        description=body.description,
+        department=dept_name,
+        category=cat_name
+    )
+
     grievance = Grievance(
         title=body.title,
         description=body.description,
@@ -343,9 +444,30 @@ async def create_grievance(
         ward_id=ward_id,
         reporter_id=user.id,
         is_sensitive=body.is_sensitive,
+        is_ai_spam=ai_is_spam,
     )
     db.add(grievance)
     await db.flush()
+
+    if not ai_is_spam:
+        # AI Worker Recommendation (Phase 2) - now in background
+        background_tasks.add_task(recommend_worker_task, grievance.id)
+
+    if ai_is_spam:
+        # Penalize user by creating the spam record (which affects CIS) then rejecting the request.
+        # Audit log for spam penalty
+        db.add(AuditLog(
+            grievance_id=grievance.id,
+            title="AI Spam Detection",
+            description="Grievance flagged as spam by AI. User penalized.",
+            icon_name="block_rounded",
+            actor_id=user.id,
+        ))
+        await db.commit()
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="AI detection has flagged this submission as spam. Your Civic Impact Score has been penalized.",
+        )
 
     for url in body.media_urls:
         m_type = "audio" if "/audio/" in url else "image"
@@ -370,8 +492,9 @@ async def create_grievance(
 @router.get(
     "/{grievance_id}",
     response_model=GrievanceDetail,
-    summary="Get grievance by ID",
-    description="Return full grievance detail including comments, events, media, assignments. **Access:** public (no auth).",
+    summary="View issue details",
+    description="See the full history and details of a specific reported issue.",
+    operation_id="fetchGrievanceDetails",
     response_description="Grievance detail.",
 )
 async def get_grievance(grievance_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
@@ -387,8 +510,9 @@ async def get_grievance(grievance_id: uuid.UUID, db: AsyncSession = Depends(get_
 @router.patch(
     "/{grievance_id}",
     response_model=GrievanceDetail,
-    summary="Update grievance",
-    description="Update status, priority, or add resolution image. Only **fieldAssistant** or **admin** can update (fieldManager cannot). When status is set to resolved, provide resolution_image_url and optional note. **Access:** fieldAssistant or admin (Bearer required).",
+    summary="Update issue status",
+    description="Use this to change the status of an issue, like marking it as resolved by adding a proof photo.",
+    operation_id="updateGrievanceProgress",
     response_description="Updated grievance detail.",
 )
 async def update_grievance(
@@ -460,8 +584,9 @@ async def update_grievance(
 @router.post(
     "/{grievance_id}/assign",
     response_model=GrievanceDetail,
-    summary="Assign field assistant to grievance",
-    description="Assign a field assistant to the grievance. User must have role fieldAssistant. **Access:** fieldManager or admin only (Bearer required).",
+    summary="Assign someone to help",
+    description="Assign a field worker to take care of this specific issue.",
+    operation_id="assignWorkerToGrievance",
     response_description="Grievance with new assignment.",
 )
 async def assign_worker(
@@ -542,8 +667,9 @@ async def assign_worker(
 @router.post(
     "/{grievance_id}/vote",
     status_code=status.HTTP_200_OK,
-    summary="Vote on grievance",
-    description="Upvote (1), downvote (-1), or remove vote (0). **Access:** any authenticated user (Bearer required).",
+    summary="Support this issue",
+    description="Show your support for an issue reported by others to help prioritize it.",
+    operation_id="voteOnGrievance",
     response_description="Updated upvotes and downvotes counts.",
 )
 async def vote_grievance(
@@ -599,8 +725,9 @@ async def vote_grievance(
 @router.get(
     "/{grievance_id}/comments",
     response_model=list[CommentOut],
-    summary="List comments",
-    description="List all comments on a grievance. **Access:** public (no auth).",
+    summary="Read discussion",
+    description="See all the comments and updates shared about this issue.",
+    operation_id="listGrievanceComments",
     response_description="List of comments.",
 )
 async def list_comments(grievance_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
@@ -625,8 +752,9 @@ async def list_comments(grievance_id: uuid.UUID, db: AsyncSession = Depends(get_
     "/{grievance_id}/comments",
     response_model=CommentOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Add comment",
-    description="Add a comment to a grievance. **Access:** any authenticated user (Bearer required).",
+    summary="Add your comment",
+    description="Share an update or ask a question about this issue.",
+    operation_id="postGrievanceComment",
     response_description="Created comment.",
 )
 async def add_comment(
@@ -674,8 +802,9 @@ async def add_comment(
 @router.post(
     "/{grievance_id}/rate",
     response_model=GrievanceDetail,
-    summary="Rate resolved grievance",
-    description="Rate a resolved grievance (1-5 stars). Only the original reporter can rate. If rating < 3, grievance is reopened to pending. **Access:** original reporter (Bearer required).",
+    summary="Rate the resolution",
+    description="Let us know if you are happy with how the issue was resolved.",
+    operation_id="rateResolutionQuality",
     response_description="Updated grievance detail.",
 )
 async def rate_grievance(
@@ -700,18 +829,44 @@ async def rate_grievance(
     g.citizen_rating = body.rating
     g.updated_at = datetime.now(timezone.utc)
 
+    # Store rating per resolution (handles reopen: each worker gets their own rating)
+    resolver_id = None
+    completed = [a for a in (g.assignments or []) if a.status == "completed"]
+    if completed:
+        latest = max(completed, key=lambda a: a.assigned_at or datetime.min)
+        resolver_id = latest.assigned_to_id
+    if resolver_id:
+        db.add(GrievanceResolutionRating(
+            grievance_id=g.id,
+            worker_id=resolver_id,
+            rating=body.rating,
+        ))
+
     if body.rating < 3:
-        # Reopen the grievance — citizen is unsatisfied
-        g.status = "pending"
+        # Low rating: reopen initially; escalate from the 3rd reopen onward.
         g.citizen_rating = body.rating  # Keep the rating for record
         g.reopen_count = (g.reopen_count or 0) + 1
-        db.add(AuditLog(
-            grievance_id=g.id,
-            title="Reopened — Low Rating",
-            description=f"Citizen rated resolution {body.rating}/5. Ticket reopened for review.",
-            icon_name=_audit_icon_for_event(title="pending", status="pending"),
-            actor_id=user.id,
-        ))
+        if (g.reopen_count or 0) >= MAX_REOPEN_BEFORE_ESCALATION:
+            g.status = "escalated"
+            db.add(AuditLog(
+                grievance_id=g.id,
+                title="Escalated — Repeated Reopen",
+                description=(
+                    f"Citizen rated resolution {body.rating}/5. "
+                    f"Ticket escalated after {g.reopen_count} low-rating reopens."
+                ),
+                icon_name=_audit_icon_for_event(title="escalated", status="escalated"),
+                actor_id=user.id,
+            ))
+        else:
+            g.status = "pending"
+            db.add(AuditLog(
+                grievance_id=g.id,
+                title="Reopened — Low Rating",
+                description=f"Citizen rated resolution {body.rating}/5. Ticket reopened for review.",
+                icon_name=_audit_icon_for_event(title="pending", status="pending"),
+                actor_id=user.id,
+            ))
     else:
         db.add(AuditLog(
             grievance_id=g.id,
@@ -722,6 +877,16 @@ async def rate_grievance(
         ))
 
     await db.commit()
+
+    # Recalculate worker rating from citizen ratings (resolver = most recent completed assignment)
+    resolver_id = None
+    completed = [a for a in (g.assignments or []) if a.status == "completed"]
+    if completed:
+        latest = max(completed, key=lambda a: a.assigned_at or datetime.min)
+        resolver_id = latest.assigned_to_id
+    if resolver_id:
+        await recalculate_worker_rating(db, worker_id=resolver_id)
+        await db.commit()
 
     fresh = await db.execute(
         select(Grievance).options(*_GRIEVANCE_DETAIL_OPTIONS).where(Grievance.id == g.id)

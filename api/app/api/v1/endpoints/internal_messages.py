@@ -5,6 +5,7 @@ from typing import List
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, or_, and_, func
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
@@ -20,7 +21,13 @@ def _get_role_name(user: User) -> str:
     r = getattr(user, "role", "citizen")
     return getattr(r, "value", r) if hasattr(r, "value") else str(r)
 
-@router.post("/send", response_model=MessageSchema)
+@router.post(
+    "/send",
+    response_model=MessageSchema,
+    summary="Send a private message",
+    description="Send a direct message to another user in the system.",
+    operation_id="sendDirectMessage",
+)
 async def send_message(
     message_in: InternalMessageCreate,
     db: AsyncSession = Depends(get_db),
@@ -74,7 +81,13 @@ async def send_message(
     await db.refresh(new_msg)
     return new_msg
 
-@router.get("/thread/{other_user_id}", response_model=List[MessageSchema])
+@router.get(
+    "/thread/{other_user_id}",
+    response_model=List[MessageSchema],
+    summary="Read message thread",
+    description="Get the full history of messages between you and another user.",
+    operation_id="fetchMessageThread",
+)
 async def get_thread(
     other_user_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -120,7 +133,13 @@ async def get_thread(
     result = await db.execute(query)
     return result.scalars().all()
 
-@router.get("/conversations", response_model=List[ConversationMember])
+@router.get(
+    "/conversations",
+    response_model=List[ConversationMember],
+    summary="List your conversations",
+    description="See all the ongoing discussions you are involved in.",
+    operation_id="listActiveConversations",
+)
 async def get_conversations(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -181,14 +200,24 @@ async def get_conversations(
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/grievance/{grievance_id}", response_model=UUID)
+@router.get(
+    "/grievance/{grievance_id}",
+    response_model=UUID,
+    summary="Open issue chat",
+    description="Find or start a chat specifically about a reported issue.",
+    operation_id="openGrievanceChatThread",
+)
 async def get_grievance_conversation(
     grievance_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     # Verify grievance exists
-    result = await db.execute(select(Grievance).where(Grievance.id == grievance_id))
+    result = await db.execute(
+        select(Grievance)
+        .options(selectinload(Grievance.category))
+        .where(Grievance.id == grievance_id)
+    )
     grievance = result.scalar_one_or_none()
     if not grievance:
         raise HTTPException(status_code=404, detail="Grievance not found")
@@ -215,44 +244,70 @@ async def get_grievance_conversation(
             db.add(conv)
             await db.flush()
             
-            # Add the current user as a participant
+            # 1. Add current user
             db.add(ConversationParticipant(conversation_id=conv.id, user_id=current_user.id))
+            
+            # 2. Add ward/department managers automatically
+            if grievance.ward_id and grievance.category and grievance.category.dept_id:
+                manager_query = select(User.id).join(
+                    WorkerProfile, User.id == WorkerProfile.user_id
+                ).where(
+                    and_(
+                        User.role == "fieldManager",
+                        WorkerProfile.ward_id == grievance.ward_id,
+                        WorkerProfile.department_id == grievance.category.dept_id
+                    )
+                )
+                manager_res = await db.execute(manager_query)
+                for (m_id,) in manager_res.all():
+                    if m_id != current_user.id:
+                        db.add(ConversationParticipant(conversation_id=conv.id, user_id=m_id))
+            
             await db.commit()
         except IntegrityError:
-            # Another request created it between our initial select and this insert.
             await db.rollback()
             conv_res = await db.execute(conv_query)
             conv = conv_res.scalar_one_or_none()
             if not conv:
                 raise HTTPException(status_code=500, detail="Failed to create or retrieve task conversation")
             
-            # Still attempt to add current user to this pre-existing conv just in case
-            part_query = select(ConversationParticipant).where(
-                and_(
-                    ConversationParticipant.conversation_id == conv.id,
-                    ConversationParticipant.user_id == current_user.id
-                )
-            )
-            part_res = await db.execute(part_query)
-            if not part_res.scalar_one_or_none():
-                db.add(ConversationParticipant(conversation_id=conv.id, user_id=current_user.id))
-                await db.commit()
-    else:
-        # Check if current user is participant, if not, add them
-        part_query = select(ConversationParticipant).where(
+            # Fall through to existing participant check
+    
+    # Check/Add participants (including managers for existing conversations)
+    participants_to_add = [current_user.id]
+    if grievance.ward_id and grievance.category and grievance.category.dept_id:
+        manager_query = select(User.id).join(
+            WorkerProfile, User.id == WorkerProfile.user_id
+        ).where(
             and_(
-                ConversationParticipant.conversation_id == conv.id,
-                ConversationParticipant.user_id == current_user.id
+                User.role == "fieldManager",
+                WorkerProfile.ward_id == grievance.ward_id,
+                WorkerProfile.department_id == grievance.category.dept_id
             )
         )
-        part_res = await db.execute(part_query)
-        if not part_res.scalar_one_or_none():
-            db.add(ConversationParticipant(conversation_id=conv.id, user_id=current_user.id))
-            await db.commit()
+        manager_res = await db.execute(manager_query)
+        for (m_id,) in manager_res.all():
+            participants_to_add.append(m_id)
+
+    # Filter out duplicates and check existence
+    existing_parts_res = await db.execute(select(ConversationParticipant.user_id).where(ConversationParticipant.conversation_id == conv.id))
+    existing_ids = {u_id for u_id, in existing_parts_res.all()}
+    
+    for u_id in set(participants_to_add):
+        if u_id not in existing_ids:
+            db.add(ConversationParticipant(conversation_id=conv.id, user_id=u_id))
+    
+    await db.commit()
 
     return conv.id
 
-@router.get("/colleagues", response_model=List[ConversationMember])
+@router.get(
+    "/colleagues",
+    response_model=List[ConversationMember],
+    summary="Find your teammates",
+    description="List people in your department that you can message.",
+    operation_id="listDepartmentColleagues",
+)
 async def get_colleagues(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -285,7 +340,13 @@ async def get_colleagues(
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail="Internal server error while fetching colleagues")
 
-@router.get("/conversations/{conversation_id}/messages", response_model=List[MessageSchema])
+@router.get(
+    "/conversations/{conversation_id}/messages",
+    response_model=List[MessageSchema],
+    summary="View chat messages",
+    description="See all messages in a specific group or task conversation.",
+    operation_id="fetchChatMessages",
+)
 async def get_conversation_messages(
     conversation_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -348,7 +409,13 @@ async def get_conversation_messages(
         
     return results
 
-@router.post("/conversations/{conversation_id}/messages", response_model=MessageSchema)
+@router.post(
+    "/conversations/{conversation_id}/messages",
+    response_model=MessageSchema,
+    summary="Post in chat",
+    description="Send a message to everyone in this specific conversation or task chat.",
+    operation_id="postChatMessage",
+)
 async def send_conversation_message(
     conversation_id: UUID,
     message_in: InternalMessageCreate,
